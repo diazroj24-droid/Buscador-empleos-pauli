@@ -1,5 +1,4 @@
 
-
 import re
 import sqlite3
 from datetime import datetime
@@ -71,6 +70,34 @@ st.markdown("""
     [data-testid="stSidebar"] {
         background: #F4F7FA;
         border-right: 1px solid var(--line);
+    }
+
+    /* Mejora visibilidad de textos en barra lateral */
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] .stMarkdown,
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] span,
+    [data-testid="stSidebar"] div {
+        color: #394B5A;
+    }
+
+    [data-testid="stSidebar"] .stCheckbox label,
+    [data-testid="stSidebar"] .stSelectbox label,
+    [data-testid="stSidebar"] .stSlider label {
+        color: #394B5A !important;
+        font-weight: 600;
+    }
+
+    [data-testid="stSidebar"] [data-baseweb="select"] *,
+    [data-testid="stSidebar"] [role="slider"] {
+        color: #394B5A !important;
+    }
+
+    [data-testid="stSidebar"] .st-bq,
+    [data-testid="stSidebar"] .st-br,
+    [data-testid="stSidebar"] .st-bs,
+    [data-testid="stSidebar"] .st-bt {
+        color: #394B5A !important;
     }
 
     h1,h2,h3,h4 {
