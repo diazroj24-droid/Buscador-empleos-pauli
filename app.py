@@ -275,6 +275,16 @@ st.markdown("""
         font-size:.82rem;
     }
 
+    .badge-gold {
+        display:inline-block;
+        background:#FFF2CF;
+        color:#875E08;
+        border-radius:8px;
+        padding:3px 8px;
+        font-weight:800;
+        font-size:.78rem;
+    }
+
     .badge-blue {
         display:inline-block;
         background:var(--blue-soft);
@@ -927,7 +937,64 @@ def load_tracked_jobs(status=None):
     for row in rows:
         payload = json.loads(row[1])
 
+        # ----------------------------------------------------------
+        # Migración/enriquecimiento para ofertas guardadas por
+        # versiones anteriores de la app.
+        # ----------------------------------------------------------
+        cargo = payload.get("Cargo", "")
+        descripcion = payload.get("Descripción", "") or ""
+
+        renta = payload.get("Renta", "") or ""
+        renta_valor = payload.get("RentaValor", None)
+
+        # Si antes no quedó guardada una renta legible, intentamos
+        # recuperarla desde descripción/renta histórica.
+        if not renta or renta == "—":
+            low, high = salary_bounds(descripcion)
+            if low is not None:
+                if high and high != low:
+                    renta = f"{money_clp(low)} – {money_clp(high)}"
+                    renta_valor = high
+                else:
+                    renta = money_clp(low)
+                    renta_valor = low
+            else:
+                renta = "Sin renta publicada"
+
+        # Asegura que haya un valor numérico utilizable.
+        if renta_valor is None and renta != "Sin renta publicada":
+            low, high = salary_bounds(renta)
+            renta_valor = high or low
+
+        # Recalcula pretensión si el registro antiguo no la tenía.
+        pretension = payload.get("Pretension", "") or ""
+        pretension_note = payload.get("PretensionNota", "") or ""
+        pretension_source = payload.get("PretensionFuente", "") or ""
+
+        if not pretension:
+            current_min = salary_min if "salary_min" in globals() else 1_200_000
+            current_max = salary_max if "salary_max" in globals() else 2_500_000
+
+            pretension, pretension_note, pretension_source = suggested_salary(
+                cargo,
+                descripcion,
+                renta if renta != "Sin renta publicada" else "",
+                current_min,
+                current_max
+            )
+
+        market_key = market_key_for_job(cargo, descripcion)
+        ref_url = payload.get("ReferenciaURL", "") or ""
+        if not ref_url and market_key in MARKET_BENCHMARKS:
+            ref_url = MARKET_BENCHMARKS[market_key]["url"]
+
         payload.update({
+            "Renta": renta,
+            "RentaValor": renta_valor,
+            "Pretension": pretension,
+            "PretensionNota": pretension_note,
+            "PretensionFuente": pretension_source,
+            "ReferenciaURL": ref_url,
             "_key": row[0],
             "Estado": row[2],
             "FechaEncontrada": row[3],
@@ -979,6 +1046,7 @@ def applications_excel_bytes(df):
         "% ajuste CV": df["Score"].fillna(0),
         "Renta publicada": df["Renta"].fillna(""),
         "Pretensión sugerida": df["Pretension"].fillna(""),
+        "Detalle pretensión": df["PretensionNota"].fillna(""),
         "Fuente salarial": df["PretensionFuente"].fillna(""),
         "Fuente oferta": df["Fuente"].fillna(""),
         "Estado": df["Estado"].fillna(""),
@@ -1022,8 +1090,8 @@ def applications_excel_bytes(df):
 
         widths = {
             0: 20, 1: 34, 2: 26, 3: 25, 4: 20,
-            5: 13, 6: 22, 7: 24, 8: 22, 9: 18,
-            10: 16, 11: 20, 12: 20, 13: 55
+            5: 13, 6: 22, 7: 24, 8: 35, 9: 22, 10: 18,
+            11: 16, 12: 20, 13: 20, 14: 55
         }
 
         for col, width in widths.items():
@@ -1786,65 +1854,114 @@ def render_job_cards(data, context="Resultados"):
 
     for _, r in data.iterrows():
         with st.container(border=True):
-            left, right = st.columns([5, 1.35])
+            left, right = st.columns([5.2, 1.35])
 
             with left:
                 score = int(r.get("Score", 0) or 0)
+                cargo = r.get("Cargo", "")
+                empresa = r.get("Empresa", "")
+                ubicacion = r.get("Ubicación", "")
+                modalidad = r.get("Modalidad", "")
+
+                # Título + ajuste
                 st.markdown(
-                    f"<div class='job-title'>{r.get('Cargo','')} "
-                    f"<span class='badge-green'>{score}% de ajuste</span></div>",
-                    unsafe_allow_html=True
+                    f"### {cargo} — {empresa}"
                 )
 
+                ajuste_icon = "🟢" if score >= 80 else ("🟠" if score >= 65 else "⚪")
                 st.markdown(
-                    f"<div class='job-meta'><b>{r.get('Empresa','')}</b> · "
-                    f"{r.get('Ubicación','')} · {r.get('Modalidad','')}</div>",
-                    unsafe_allow_html=True
+                    f"{ajuste_icon} **{score}% de ajuste**"
                 )
 
-                salary = r.get("Renta", "Sin renta publicada")
+                # Renta publicada
+                renta = r.get("Renta", "") or "Sin renta publicada"
                 st.markdown(
-                    f"<div class='salary-line'>💵 <b>Renta publicada:</b> {salary} &nbsp;&nbsp; "
-                    f"🎯 <b>Pretensión sugerida:</b> {r.get('Pretension','')}</div>",
-                    unsafe_allow_html=True
+                    f"💵 **Renta publicada:** {renta}"
                 )
+
+                # Pretensión sugerida
+                pretension = r.get("Pretension", "") or "No calculada"
+                st.markdown(
+                    f"🎯 **Pretensión sugerida:** {pretension}"
+                )
+
+                # Referencia salarial
+                pret_note = r.get("PretensionNota", "") or ""
+                pret_source = r.get("PretensionFuente", "") or ""
+
+                referencia = ""
+                if pret_note and pret_source:
+                    referencia = f"{pret_note} — {pret_source}"
+                elif pret_note:
+                    referencia = pret_note
+                elif pret_source:
+                    referencia = pret_source
+
+                if referencia:
+                    st.markdown(
+                        f"**Referencia:** {referencia}"
+                    )
+
+                # Ubicación / modalidad / fuente
+                fuente = r.get("Fuente", "") or "No informada"
+                st.caption(
+                    f"📍 {ubicacion} · 🏢 {modalidad} · 🌐 Fuente: {fuente}"
+                )
+
+                # Fechas
+                if r.get("FechaEncontrada"):
+                    fecha = str(r.get("FechaEncontrada")).replace("T", " ")
+                    st.caption(f"🔎 Encontrada: {fecha}")
 
                 if r.get("FechaPostulacion"):
                     fecha = str(r.get("FechaPostulacion")).replace("T", " ")
                     st.markdown(
-                        f"<div class='salary-line'>📅 <b>Postulada:</b> {fecha}</div>",
-                        unsafe_allow_html=True
+                        f"📅 **Postulada:** {fecha}"
                     )
 
                 if r.get("FechaGuardada") and context == "Guardadas":
                     fecha = str(r.get("FechaGuardada")).replace("T", " ")
                     st.markdown(
-                        f"<div class='salary-line'>⭐ <b>Guardada:</b> {fecha}</div>",
-                        unsafe_allow_html=True
+                        f"⭐ **Guardada:** {fecha}"
                     )
 
                 if r.get("FechaDescarte") and context == "Descartadas":
                     fecha = str(r.get("FechaDescarte")).replace("T", " ")
                     st.markdown(
-                        f"<div class='salary-line'>🗑️ <b>Descartada:</b> {fecha}</div>",
-                        unsafe_allow_html=True
+                        f"🗑️ **Descartada:** {fecha}"
                     )
 
-                desc = r.get("Descripción", "")
+                # Descripción
+                desc = r.get("Descripción", "") or ""
                 if desc:
                     st.markdown(
-                        f"<div class='muted'>{desc[:380]}"
-                        f"{'...' if len(desc)>380 else ''}</div>",
+                        f"<div class='muted' style='margin-top:8px;'>"
+                        f"{desc[:450]}{'...' if len(desc)>450 else ''}"
+                        f"</div>",
                         unsafe_allow_html=True
                     )
 
+                # Habilidades detectadas
                 skills = r.get("Skills", []) or []
+                if isinstance(skills, str):
+                    skills = [s.strip() for s in skills.split(",") if s.strip()]
+
                 if skills:
                     chips = "".join(
                         f"<span class='badge-blue'>{s}</span>"
                         for s in skills
                     )
-                    st.markdown(chips, unsafe_allow_html=True)
+                    st.markdown(
+                        f"<div style='margin-top:8px;'>{chips}</div>",
+                        unsafe_allow_html=True
+                    )
+
+                # Link a referencia salarial cuando existe
+                ref_url = r.get("ReferenciaURL", "") or ""
+                if ref_url and renta == "Sin renta publicada":
+                    st.markdown(
+                        f"[Ver referencia salarial]({ref_url})"
+                    )
 
             with right:
                 link = r.get("Enlace", "")
@@ -1874,12 +1991,13 @@ def render_job_cards(data, context="Resultados"):
                             "Postulada"
                         )
 
-                    action_button(
-                        "🗑️ Descartar",
-                        f"discard_{abs(hash(key))}",
-                        key,
-                        "Descartada"
-                    )
+                    if r.get("Estado") != "Descartada":
+                        action_button(
+                            "🗑️ Descartar",
+                            f"discard_{abs(hash(key))}",
+                            key,
+                            "Descartada"
+                        )
 
                 elif context == "Guardadas":
                     action_button(
