@@ -1045,6 +1045,78 @@ def tracked_counts():
 
     return counts
 
+def persist_fallback_as_job(row, status):
+    key = f"fallback|{row.get('Cargo','')}|{row.get('Empresa','')}|{row.get('Fuente','')}"
+    stamp = now_iso()
+
+    payload = {
+        "Cargo": row.get("Cargo",""),
+        "Empresa": row.get("Empresa",""),
+        "Ubicación": row.get("Ubicación",""),
+        "Fuente": row.get("Fuente",""),
+        "Score": int(row.get("Score", 0) or 0),
+        "Renta": row.get("Renta","Sin renta publicada"),
+        "RentaValor": (
+            None if pd.isna(row.get("RentaValor"))
+            else int(row.get("RentaValor"))
+        ),
+        "Pretension": row.get("Pretension",""),
+        "PretensionNota": row.get("PretensionNota",""),
+        "PretensionFuente": row.get("PretensionFuente",""),
+        "ReferenciaURL": row.get("ReferenciaURL",""),
+        "Modalidad": row.get("Modalidad",""),
+        "Descripción": row.get("Descripción",""),
+        "Skills": row.get("Skills",[]) or [],
+        "Enlace": row.get("Enlace",""),
+    }
+
+    existing = DB.execute(
+        "SELECT first_seen, saved_at, applied_at, discarded_at FROM tracked_jobs WHERE job_key=?",
+        (key,)
+    ).fetchone()
+
+    if existing:
+        first_seen, saved_at, applied_at, discarded_at = existing
+    else:
+        first_seen = stamp
+        saved_at = applied_at = discarded_at = None
+
+    if status == "Guardada" and not saved_at:
+        saved_at = stamp
+    if status == "Postulada" and not applied_at:
+        applied_at = stamp
+    if status == "Descartada" and not discarded_at:
+        discarded_at = stamp
+
+    DB.execute("""
+        INSERT INTO tracked_jobs(
+            job_key, payload_json, status,
+            first_seen, last_seen, saved_at,
+            applied_at, discarded_at, updated_at
+        )
+        VALUES(?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(job_key)
+        DO UPDATE SET
+            payload_json=excluded.payload_json,
+            status=excluded.status,
+            last_seen=excluded.last_seen,
+            saved_at=COALESCE(tracked_jobs.saved_at, excluded.saved_at),
+            applied_at=COALESCE(tracked_jobs.applied_at, excluded.applied_at),
+            discarded_at=COALESCE(tracked_jobs.discarded_at, excluded.discarded_at),
+            updated_at=excluded.updated_at
+    """, (
+        key,
+        json.dumps(payload, ensure_ascii=False),
+        status,
+        first_seen,
+        stamp,
+        saved_at,
+        applied_at,
+        discarded_at,
+        stamp
+    ))
+    DB.commit()
+
 def save_fallback_search(row):
     key = f"{row.get('Cargo','')}|{row.get('Empresa','')}|{row.get('Fuente','')}"
     note = (row.get("PretensionNota", "") or "").replace("Referencia:", "").strip()
@@ -2271,13 +2343,37 @@ elif page == "Resultados":
                             use_container_width=True
                         )
 
+                    base_key = abs(hash(
+                        str(r.get("Cargo","")) +
+                        str(r.get("Empresa","")) +
+                        str(r.get("Fuente",""))
+                    ))
+
                     if st.button(
-                        "⭐ Guardar búsqueda",
-                        key=f"save_fallback_{abs(hash(str(r.get('Cargo','')) + str(r.get('Empresa','')) + str(r.get('Fuente',''))))}",
+                        "⭐ Guardar",
+                        key=f"save_fallback_{base_key}",
                         use_container_width=True
                     ):
-                        save_fallback_search(r)
-                        st.success("Búsqueda guardada.")
+                        persist_fallback_as_job(r, "Guardada")
+                        st.success("Guardada en la sección Guardadas.")
+                        st.rerun()
+
+                    if st.button(
+                        "✅ Postular",
+                        key=f"apply_fallback_{base_key}",
+                        use_container_width=True
+                    ):
+                        persist_fallback_as_job(r, "Postulada")
+                        st.success("Registrada en Postuladas con fecha y hora.")
+                        st.rerun()
+
+                    if st.button(
+                        "🗑️ Descartar",
+                        key=f"discard_fallback_{base_key}",
+                        use_container_width=True
+                    ):
+                        persist_fallback_as_job(r, "Descartada")
+                        st.success("Movida a Descartadas.")
                         st.rerun()
 
 # ---------- GUARDADAS ----------
