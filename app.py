@@ -497,7 +497,204 @@ def active_queries():
 
     return unique[:12]
 
+
 TARGET_PLUS = 2_500_000
+
+# Referencias salariales Chile.
+# Se usan SOLO cuando el aviso no publica una renta.
+# Las cifras son referencias de mercado y no una promesa de sueldo.
+MARKET_BENCHMARKS = {
+    "procesos": {
+        "avg": 1_163_306,
+        "low": 685_565,
+        "high": 1_973_965,
+        "label": "Analista de procesos · Santiago",
+        "source": "Indeed Chile",
+        "url": "https://cl.indeed.com/career/analista-de-procesos/salaries/Santiago-de-Chile--Regi%C3%B3n-Metropolitana"
+    },
+    "control_gestion": {
+        "avg": 906_005,
+        "low": 508_749,
+        "high": 1_613_458,
+        "label": "Analista de control de gestión · Santiago",
+        "source": "Indeed Chile",
+        "url": "https://cl.indeed.com/career/analista-de-control-de-gesti%C3%B3n/salaries/Santiago-de-Chile--Regi%C3%B3n-Metropolitana"
+    },
+    "bi": {
+        "avg": 1_316_462,
+        "low": 902_055,
+        "high": 1_921_250,
+        "label": "Analista Business Intelligence · Santiago",
+        "source": "Indeed Chile",
+        "url": "https://cl.indeed.com/career/analista-business-intelligence/salaries/Santiago-de-Chile--Regi%C3%B3n-Metropolitana"
+    },
+    "operaciones": {
+        "avg": 718_827,
+        "low": 423_724,
+        "high": 1_422_362,
+        "label": "Analista de operaciones · Región Metropolitana",
+        "source": "Indeed Chile",
+        "url": "https://cl.indeed.com/career/analista-de-operaciones/salaries/Regi%C3%B3n-Metropolitana"
+    },
+}
+
+def money_clp(value):
+    if value is None:
+        return "—"
+    return "$" + f"{int(value):,}".replace(",", ".")
+
+def round_50k(value):
+    return int(round(value / 50_000) * 50_000)
+
+def market_key_for_job(title, description=""):
+    txt = norm(f"{title} {description}")
+
+    if any(k in txt for k in [
+        "business intelligence", "power bi", "bi analyst",
+        "inteligencia de negocios"
+    ]):
+        return "bi"
+
+    if any(k in txt for k in [
+        "control de gestión", "control de gestion",
+        "controller", "gestión comercial", "gestion comercial"
+    ]):
+        return "control_gestion"
+
+    if any(k in txt for k in [
+        "operaciones", "operational", "operations analyst"
+    ]):
+        return "operaciones"
+
+    if any(k in txt for k in [
+        "proceso", "process", "mejora continua",
+        "excelencia operacional", "bpmn", "transformación"
+    ]):
+        return "procesos"
+
+    return None
+
+def salary_bounds(text):
+    """Devuelve (mínimo, máximo) mensual CLP cuando puede interpretarlo."""
+    if not text:
+        return None, None
+
+    s = str(text).lower().replace("\xa0", " ")
+
+    # Detecta si la publicación está expresada por año.
+    annual = any(x in s for x in ["por año", "al año", "/año", "anual"])
+
+    # 1,5 millones / 2.5 millones
+    million_vals = []
+    for a, b in re.findall(r"(\d{1,2})[\.,](\d)\s*(?:mill[oó]n|millones|m)\b", s):
+        million_vals.append(int(float(f"{a}.{b}") * 1_000_000))
+
+    for a in re.findall(r"(\d{1,2})\s*(?:mill[oó]n|millones)\b", s):
+        million_vals.append(int(a) * 1_000_000)
+
+    # $1.500.000 / 1500000
+    raw_vals = []
+    for raw in re.findall(r"\$?\s*(\d[\d\.\,]{5,})", s):
+        digits = re.sub(r"\D", "", raw)
+        if digits.isdigit():
+            v = int(digits)
+            if 500_000 <= v <= 100_000_000:
+                raw_vals.append(v)
+
+    vals = million_vals + raw_vals
+
+    if not vals:
+        return None, None
+
+    # Quitar duplicados y ordenar.
+    vals = sorted(set(vals))
+
+    low = vals[0]
+    high = vals[-1]
+
+    # Convertir valores anuales a mensuales.
+    if annual:
+        low = int(low / 12)
+        high = int(high / 12)
+
+    return low, high
+
+def suggested_salary(title, description, published_text, user_min, user_max):
+    """
+    Genera una pretensión orientativa.
+    Prioridad:
+    1. Renta publicada en el aviso.
+    2. Referencia de mercado Chile.
+    3. Rango objetivo definido por la usuaria.
+    """
+    pub_low, pub_high = salary_bounds(published_text)
+
+    if pub_low is not None:
+        # Si hay banda publicada, sugerimos posicionarse entre el 70% y 90%
+        # del recorrido de la banda, sin superar el máximo informado.
+        if pub_high and pub_high > pub_low:
+            low = pub_low + (pub_high - pub_low) * 0.65
+            high = pub_low + (pub_high - pub_low) * 0.90
+        else:
+            low = pub_low * 0.95
+            high = pub_low * 1.05
+
+        low = round_50k(low)
+        high = round_50k(high)
+
+        if user_min:
+            low = max(low, user_min)
+        if user_max:
+            high = min(high, user_max)
+
+        if high < low:
+            # El aviso está bajo el objetivo configurado.
+            return (
+                f"{money_clp(pub_low)} – {money_clp(pub_high or pub_low)}",
+                "Renta del aviso bajo tu rango objetivo",
+                "Aviso publicado"
+            )
+
+        return (
+            f"{money_clp(low)} – {money_clp(high)}",
+            "Basada en la banda salarial publicada",
+            "Aviso publicado"
+        )
+
+    key = market_key_for_job(title, description)
+
+    if key and key in MARKET_BENCHMARKS:
+        ref = MARKET_BENCHMARKS[key]
+
+        # Para un perfil con experiencia, se utiliza la zona media-alta
+        # de la referencia, respetando el piso definido en la app.
+        low = max(user_min or 0, round_50k(max(ref["avg"] * 1.10, ref["low"])))
+        high_market = round_50k(ref["high"] * 0.95)
+
+        if "senior" in norm(title) or "especialista" in norm(title) or "ingeniero" in norm(title):
+            low = max(low, round_50k(ref["avg"] * 1.20))
+            high_market = max(high_market, round_50k(ref["avg"] * 1.45))
+
+        high = high_market
+        if user_max:
+            high = min(high, user_max)
+
+        if high < low:
+            high = low
+
+        return (
+            f"{money_clp(low)} – {money_clp(high)}",
+            f"Referencia: {ref['label']}",
+            ref["source"]
+        )
+
+    # Último recurso: usar el rango objetivo configurado.
+    fallback_high = user_max if user_max else max(user_min + 500_000, 2_500_000)
+    return (
+        f"{money_clp(user_min)} – {money_clp(fallback_high)}",
+        "Basada en tu rango objetivo; sin referencia específica del cargo",
+        "Perfil de búsqueda"
+    )
 
 @st.cache_resource
 def get_db():
@@ -581,13 +778,17 @@ def salary_data(job):
 
     if isinstance(ext,dict) and ext.get("salary"):
         txt = str(ext["salary"])
-        return txt,parse_salary(txt)
+        low, high = salary_bounds(txt)
+        val = high or low
+        return txt, val
 
     text = " ".join(job.get("extensions",[]) or []) + " " + job.get("description","")
-    v = parse_salary(text)
+    low, high = salary_bounds(text)
 
-    if v:
-        return f"${v:,.0f} CLP".replace(",","."),v
+    if low is not None:
+        if high and high != low:
+            return f"{money_clp(low)} – {money_clp(high)}", high
+        return money_clp(low), low
 
     return "Sin renta publicada",None
 
@@ -696,16 +897,36 @@ def fallback_links():
 
     for q in active_queries():
         enc = quote_plus(q)
-        slug = q.replace(" ","-")
+        google_indeed = quote_plus(f'site:cl.indeed.com "{q}" Santiago sueldo')
+        google_chiletrabajos = quote_plus(f'site:chiletrabajos.cl/trabajo "{q}" Santiago salario')
+        google_laborum = quote_plus(f'site:laborum.cl "{q}" Santiago sueldo')
 
         rows += [
             {
                 "title":q.title(),
-                "company_name":"LinkedIn Jobs",
+                "company_name":"Indeed Chile",
                 "location":"Santiago / Chile",
-                "via":"LinkedIn",
-                "description":"Búsqueda directa en LinkedIn.",
-                "job_apply_link":f"https://www.linkedin.com/jobs/search/?keywords={enc}&location=Santiago%2C%20Chile",
+                "via":"Indeed",
+                "description":"Búsqueda prioritaria en un portal que muestra renta en parte de sus avisos y referencias salariales por cargo.",
+                "job_apply_link":f"https://cl.indeed.com/jobs?q={enc}&l=Santiago%2C+Regi%C3%B3n+Metropolitana",
+                "_fallback":True
+            },
+            {
+                "title":q.title(),
+                "company_name":"Chiletrabajos",
+                "location":"Santiago / Chile",
+                "via":"Chiletrabajos",
+                "description":"Búsqueda en Chiletrabajos, donde varios avisos publican un campo de salario.",
+                "job_apply_link":f"https://www.google.com/search?q={google_chiletrabajos}",
+                "_fallback":True
+            },
+            {
+                "title":q.title(),
+                "company_name":"Laborum Chile",
+                "location":"Santiago / Chile",
+                "via":"Laborum",
+                "description":"Búsqueda en Laborum y referencia de renta pretendida/salarios para Chile.",
+                "job_apply_link":f"https://www.google.com/search?q={google_laborum}",
                 "_fallback":True
             },
             {
@@ -713,19 +934,19 @@ def fallback_links():
                 "company_name":"Computrabajo",
                 "location":"Santiago / Chile",
                 "via":"Computrabajo",
-                "description":"Búsqueda directa en Computrabajo.",
-                "job_apply_link":f"https://cl.computrabajo.com/trabajo-de-{slug}",
+                "description":"Búsqueda complementaria de ofertas.",
+                "job_apply_link":f"https://cl.computrabajo.com/trabajo-de-{q.replace(' ','-')}",
                 "_fallback":True
             },
             {
                 "title":q.title(),
-                "company_name":"Trabajando.com",
+                "company_name":"LinkedIn Jobs",
                 "location":"Santiago / Chile",
-                "via":"Trabajando",
-                "description":"Búsqueda directa en Trabajando.com.",
-                "job_apply_link":f"https://www.trabajando.cl/trabajo-empleo/?q={enc}",
+                "via":"LinkedIn",
+                "description":"Búsqueda complementaria; muchos avisos no publican renta.",
+                "job_apply_link":f"https://www.linkedin.com/jobs/search/?keywords={enc}&location=Santiago%2C%20Chile",
                 "_fallback":True
-            }
+            },
         ]
 
     return rows
@@ -747,6 +968,25 @@ def build_df(jobs):
         sal_txt,sal_val = salary_data(j)
         key = f"{title}|{company}|{loc}"
 
+        # Usa el rango salarial que esté actualmente seleccionado en el sidebar.
+        current_min = salary_min if "salary_min" in globals() else 1_200_000
+        current_max = salary_max if "salary_max" in globals() else 2_500_000
+
+        pretension, pretension_note, pretension_source = suggested_salary(
+            title,
+            desc,
+            sal_txt if sal_txt != "Sin renta publicada" else "",
+            current_min,
+            current_max
+        )
+
+        market_key = market_key_for_job(title, desc)
+        market_url = (
+            MARKET_BENCHMARKS[market_key]["url"]
+            if market_key in MARKET_BENCHMARKS
+            else ""
+        )
+
         rows.append({
             "Cargo":title,
             "Empresa":company,
@@ -755,6 +995,10 @@ def build_df(jobs):
             "Score":score,
             "Renta":sal_txt,
             "RentaValor":sal_val,
+            "Pretension":pretension,
+            "PretensionNota":pretension_note,
+            "PretensionFuente":pretension_source,
+            "ReferenciaURL":market_url,
             "Modalidad":detect_work_mode(j),
             "Descripción":desc,
             "Skills":extract_skills(desc),
@@ -894,6 +1138,18 @@ with st.sidebar:
     show_low = st.checkbox("Mostrar ajuste bajo",False)
     show_below = st.checkbox("Mostrar rentas < $1,2M",False)
     only_salary = st.checkbox("Solo con renta publicada",False)
+
+    prefer_salary = st.checkbox(
+        "Priorizar ofertas con renta",
+        value=True,
+        help="Ordena primero las ofertas donde el portal informa una renta."
+    )
+
+    st.markdown('<div class="sidebar-section">Fuentes salariales Chile</div>', unsafe_allow_html=True)
+    st.caption(
+        "La app prioriza referencias de Indeed Chile y Chiletrabajos cuando "
+        "la renta está disponible. Laborum se usa como referencia de mercado."
+    )
 
     st.markdown('<div class="sidebar-section">Tipo de trabajo</div>',unsafe_allow_html=True)
 
@@ -1084,26 +1340,36 @@ elif mode == "fallback":
 # ==========================================================
 if jobs:
     if mode == "live":
+        sort_base = preview_df.copy()
+        sort_base["_TieneRenta"] = sort_base["RentaValor"].notna().astype(int)
+
         if sort_option == "Mayor % de ajuste":
-            df = preview_df.sort_values(
-                ["Score","Empresa"],
-                ascending=[False,True],
-                na_position="last"
-            )
+            if prefer_salary:
+                df = sort_base.sort_values(
+                    ["_TieneRenta","Score","Empresa"],
+                    ascending=[False,False,True],
+                    na_position="last"
+                )
+            else:
+                df = sort_base.sort_values(
+                    ["Score","Empresa"],
+                    ascending=[False,True],
+                    na_position="last"
+                )
         elif sort_option == "Menor % de ajuste":
-            df = preview_df.sort_values(
+            df = sort_base.sort_values(
                 ["Score","Empresa"],
                 ascending=[True,True],
                 na_position="last"
             )
         elif sort_option == "Renta publicada: mayor a menor":
-            df = preview_df.sort_values(
+            df = sort_base.sort_values(
                 ["RentaValor","Score"],
                 ascending=[False,False],
                 na_position="last"
             )
         else:
-            df = preview_df.sort_values(
+            df = sort_base.sort_values(
                 ["Empresa","Score"],
                 ascending=[True,False],
                 na_position="last"
@@ -1147,6 +1413,12 @@ if jobs:
                             f"<div class='salary-line'>🌐 Fuente: {r['Fuente']}</div>",
                             unsafe_allow_html=True
                         )
+                        st.markdown(
+                            f"<div class='salary-line'>🎯 <b>Pretensión orientativa:</b> "
+                            f"{r['Pretension']} <span style='color:#6D7D8D;'>· "
+                            f"{r['PretensionNota']}</span></div>",
+                            unsafe_allow_html=True
+                        )
                     else:
                         salary_tag = (
                             "2,5M+"
@@ -1155,10 +1427,26 @@ if jobs:
                         )
 
                         st.markdown(
-                            f"<div class='salary-line'>💵 {salary_tag} &nbsp;&nbsp; "
+                            f"<div class='salary-line'>💵 <b>Renta publicada:</b> {salary_tag} &nbsp;&nbsp; "
                             f"🏢 {r['Modalidad']}</div>",
                             unsafe_allow_html=True
                         )
+
+                        st.markdown(
+                            f"<div class='salary-line'>🎯 <b>Pretensión sugerida:</b> "
+                            f"{r['Pretension']} "
+                            f"<span style='color:#6D7D8D;'>· {r['PretensionNota']} "
+                            f"({r['PretensionFuente']})</span></div>",
+                            unsafe_allow_html=True
+                        )
+
+                        if r["ReferenciaURL"] and r["Renta"] == "Sin renta publicada":
+                            st.markdown(
+                                f"<div class='muted'>Referencia de mercado: "
+                                f"<a href='{r['ReferenciaURL']}' target='_blank'>ver fuente salarial</a>"
+                                f"</div>",
+                                unsafe_allow_html=True
+                            )
 
                     if r["Descripción"]:
                         t = r["Descripción"]
