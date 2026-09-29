@@ -1,4 +1,5 @@
 
+
 import re
 import sqlite3
 from datetime import datetime
@@ -7,6 +8,9 @@ from urllib.parse import quote_plus
 import pandas as pd
 import requests
 import streamlit as st
+from docx import Document
+from pypdf import PdfReader
+from io import BytesIO
 
 st.set_page_config(
     page_title="Buscador Laboral Paulina",
@@ -307,7 +311,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-PROFILE = {
+DEFAULT_PROFILE = {
     "roles": [
         "Ingeniera de Procesos","Analista Senior de Procesos","Mejora Continua",
         "Excelencia Operacional","Experiencia Cliente","Customer Experience",
@@ -322,13 +326,102 @@ PROFILE = {
     ]
 }
 
-SEARCH_QUERIES = [
+DEFAULT_SEARCH_QUERIES = [
     "analista senior procesos",
     "ingeniero procesos mejora continua",
     "excelencia operacional",
     "control de gestion power bi",
     "business process analyst",
 ]
+
+SKILL_CATALOG = [
+    "Power BI","Excel","SQL","Bizagi","BPMN","BPM","Lean","Kaizen",
+    "AS IS","TO BE","KPIs","automatización","RPA","mejora continua",
+    "customer journey","experiencia cliente","gestión de procesos",
+    "reportes ejecutivos","stakeholders","gestión del cambio",
+    "Design Thinking","Agile","MS Project","Salesforce","Visio",
+    "Python","Tableau","SAP","control de gestión","PMO"
+]
+
+ROLE_RULES = [
+    (["proceso","bpmn","as is","to be","mejora continua"], [
+        "analista senior procesos",
+        "ingeniero procesos mejora continua",
+        "excelencia operacional"
+    ]),
+    (["control de gestión","control de gestion","kpi","indicadores"], [
+        "analista control de gestion power bi"
+    ]),
+    (["power bi","business intelligence","bi ","sql"], [
+        "analista business intelligence power bi"
+    ]),
+    (["experiencia cliente","customer experience","customer journey","nps","csat"], [
+        "analista experiencia cliente procesos"
+    ]),
+    (["pmo","proyecto","project"], [
+        "pmo proyectos mejora continua"
+    ]),
+    (["operaciones","operacional","operational"], [
+        "analista operaciones mejora continua"
+    ]),
+    (["transformación digital","transformacion digital","automatización","automatizacion","rpa"], [
+        "transformacion digital procesos automatizacion"
+    ]),
+]
+
+def extract_cv_text(uploaded_file):
+    data = uploaded_file.getvalue()
+    name = uploaded_file.name.lower()
+
+    if name.endswith(".docx"):
+        doc = Document(BytesIO(data))
+        return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+
+    if name.endswith(".pdf"):
+        reader = PdfReader(BytesIO(data))
+        return "\n".join((page.extract_text() or "") for page in reader.pages)
+
+    if name.endswith(".txt"):
+        return data.decode("utf-8", errors="ignore")
+
+    return ""
+
+def profile_from_cv(cv_text):
+    low = cv_text.lower()
+
+    skills = []
+    for skill in SKILL_CATALOG:
+        if skill.lower() in low and skill not in skills:
+            skills.append(skill)
+
+    queries = []
+    for triggers, suggested in ROLE_RULES:
+        if any(t in low for t in triggers):
+            for q in suggested:
+                if q not in queries:
+                    queries.append(q)
+
+    if not queries:
+        queries = DEFAULT_SEARCH_QUERIES.copy()
+
+    # Mantener la búsqueda acotada para no consumir demasiadas consultas API.
+    queries = queries[:7]
+
+    # Los cargos sirven también para el cálculo de compatibilidad.
+    roles = [q.title() for q in queries]
+
+    return {
+        "roles": roles,
+        "skills": skills if skills else DEFAULT_PROFILE["skills"].copy()
+    }, queries
+
+def active_profile():
+    return st.session_state.get("active_profile", DEFAULT_PROFILE)
+
+def active_queries():
+    raw = st.session_state.get("query_editor", "")
+    queries = [q.strip() for q in raw.splitlines() if q.strip()]
+    return queries[:8] if queries else DEFAULT_SEARCH_QUERIES
 
 TARGET_PLUS = 2_500_000
 
@@ -366,10 +459,11 @@ def norm(t):
 def score_job(title,company,desc):
     text = norm(f"{title} {company} {desc}")
     score = 35
-    score += min(sum(norm(s) in text for s in PROFILE["skills"]) * 4,36)
+    profile = active_profile()
+    score += min(sum(norm(s) in text for s in profile["skills"]) * 4,36)
 
     hits = 0
-    for role in PROFILE["roles"]:
+    for role in profile["roles"]:
         words = [w for w in norm(role).split() if len(w)>3]
         if words and sum(w in text for w in words) >= max(1,len(words)//2):
             hits += 1
@@ -466,7 +560,7 @@ def search_live():
 
     jobs,errors = [],[]
 
-    for q in SEARCH_QUERIES:
+    for q in active_queries():
         try:
             r = requests.get(
                 "https://serpapi.com/search.json",
@@ -513,7 +607,7 @@ def search_live():
 def fallback_links():
     rows = []
 
-    for q in SEARCH_QUERIES:
+    for q in active_queries():
         enc = quote_plus(q)
         slug = q.replace(" ","-")
 
@@ -601,6 +695,61 @@ with st.sidebar:
     <div class="nav-item">🗑️ &nbsp; Descartadas</div>
     <div class="nav-item">🕘 &nbsp; Historial</div>
     """,unsafe_allow_html=True)
+
+
+    st.markdown('<div class="sidebar-section">CV de búsqueda</div>', unsafe_allow_html=True)
+
+    uploaded_cv = st.file_uploader(
+        "Subir nuevo CV",
+        type=["pdf","docx","txt"],
+        help="El CV se utiliza para detectar habilidades y ajustar las búsquedas."
+    )
+
+    if uploaded_cv is not None:
+        if st.button("📄 Usar este CV", use_container_width=True):
+            try:
+                cv_text = extract_cv_text(uploaded_cv)
+                if len(cv_text.strip()) < 80:
+                    st.error("No pude extraer suficiente texto del CV.")
+                else:
+                    new_profile, new_queries = profile_from_cv(cv_text)
+                    st.session_state["active_profile"] = new_profile
+                    st.session_state["active_cv_name"] = uploaded_cv.name
+                    st.session_state["query_editor"] = "\n".join(new_queries)
+                    # Borra resultados anteriores para no mezclar perfiles.
+                    st.session_state.pop("jobs", None)
+                    st.session_state.pop("mode", None)
+                    st.session_state["found_count"] = 0
+                    st.success("CV aplicado a la búsqueda.")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"No pude leer el CV: {type(e).__name__}")
+
+    current_cv = st.session_state.get("active_cv_name", "CV inicial de Paulina")
+    st.caption(f"CV activo: **{current_cv}**")
+
+    if st.button("↩️ Volver al CV inicial", use_container_width=True):
+        st.session_state["active_profile"] = DEFAULT_PROFILE.copy()
+        st.session_state["active_cv_name"] = "CV inicial de Paulina"
+        st.session_state["query_editor"] = "\n".join(DEFAULT_SEARCH_QUERIES)
+        st.session_state.pop("jobs", None)
+        st.session_state.pop("mode", None)
+        st.session_state["found_count"] = 0
+        st.rerun()
+
+    # Inicializa los cargos objetivo la primera vez.
+    if "query_editor" not in st.session_state:
+        st.session_state["query_editor"] = "\n".join(DEFAULT_SEARCH_QUERIES)
+
+    st.text_area(
+        "Cargos / búsquedas objetivo",
+        key="query_editor",
+        height=135,
+        help="Una búsqueda por línea. Puedes editar estas frases manualmente."
+    )
+
+    with st.expander("Ver habilidades detectadas"):
+        st.write(" · ".join(active_profile()["skills"]))
 
     st.markdown('<div class="sidebar-section">Filtros de búsqueda</div>',unsafe_allow_html=True)
 
