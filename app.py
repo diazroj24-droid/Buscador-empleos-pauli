@@ -554,6 +554,18 @@ def money_clp(value):
         return "—"
     return "$" + f"{int(value):,}".replace(",", ".")
 
+def safe_money_html(value):
+    """
+    Evita que Streamlit interprete montos con $...$ como LaTeX.
+    Convierte $ a entidad HTML y normaliza el separador del rango.
+    """
+    if value is None:
+        return "—"
+    txt = str(value)
+    txt = txt.replace("$", "&#36;")
+    txt = txt.replace(" - ", " – ")
+    return txt
+
 def round_50k(value):
     return int(round(value / 50_000) * 50_000)
 
@@ -2021,14 +2033,20 @@ def render_job_cards(data, context="Resultados"):
 
                 # Renta publicada
                 renta = r.get("Renta", "") or "Sin renta publicada"
+                renta_html = safe_money_html(renta)
                 st.markdown(
-                    f"💵 **Renta publicada:** {renta}"
+                    f"<div style='font-size:1rem;margin:4px 0;'>"
+                    f"💵 <b>Renta publicada:</b> {renta_html}</div>",
+                    unsafe_allow_html=True
                 )
 
                 # Pretensión sugerida
                 pretension = r.get("Pretension", "") or "No calculada"
+                pretension_html = safe_money_html(pretension)
                 st.markdown(
-                    f"🎯 **Pretensión sugerida:** {pretension}"
+                    f"<div style='font-size:1rem;margin:4px 0;'>"
+                    f"🎯 <b>Pretensión sugerida:</b> {pretension_html}</div>",
+                    unsafe_allow_html=True
                 )
 
                 # Referencia y criterio salarial
@@ -2279,12 +2297,17 @@ elif page == "Resultados":
                     )
 
                     st.markdown(
-                        "💵 **Renta publicada:** Sin renta publicada"
+                        "<div style='font-size:1rem;margin:4px 0;'>"
+                        "💵 <b>Renta publicada:</b> Sin renta publicada</div>",
+                        unsafe_allow_html=True
                     )
 
                     pretension = r.get("Pretension", "") or "No calculada"
+                    pretension_html = safe_money_html(pretension)
                     st.markdown(
-                        f"🎯 **Pretensión sugerida:** {pretension}"
+                        f"<div style='font-size:1rem;margin:4px 0;'>"
+                        f"🎯 <b>Pretensión sugerida:</b> {pretension_html}</div>",
+                        unsafe_allow_html=True
                     )
 
                     note = (r.get("PretensionNota", "") or "").replace("Referencia:", "").strip()
