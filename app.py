@@ -2,6 +2,7 @@
 
 import re
 import sqlite3
+import json
 from datetime import datetime
 from urllib.parse import quote_plus
 
@@ -699,6 +700,23 @@ def suggested_salary(title, description, published_text, user_min, user_max):
 @st.cache_resource
 def get_db():
     conn = sqlite3.connect("jobs.db", check_same_thread=False)
+
+    # Tabla histórica de ofertas. Conserva resultados entre búsquedas.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS tracked_jobs(
+            job_key TEXT PRIMARY KEY,
+            payload_json TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'Nueva',
+            first_seen TEXT NOT NULL,
+            last_seen TEXT NOT NULL,
+            saved_at TEXT,
+            applied_at TEXT,
+            discarded_at TEXT,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
+    # Se mantiene para compatibilidad con versiones anteriores.
     conn.execute("""
         CREATE TABLE IF NOT EXISTS job_status(
             job_key TEXT PRIMARY KEY,
@@ -706,23 +724,329 @@ def get_db():
             updated_at TEXT
         )
     """)
+
     conn.commit()
     return conn
 
 DB = get_db()
 
-def get_status(key):
-    row = DB.execute("SELECT status FROM job_status WHERE job_key=?", (key,)).fetchone()
-    return row[0] if row else "Nueva"
+def now_iso():
+    return datetime.now().isoformat(timespec="seconds")
 
-def set_status(key,status):
+def get_status(key):
+    row = DB.execute(
+        "SELECT status FROM tracked_jobs WHERE job_key=?",
+        (key,)
+    ).fetchone()
+
+    if row:
+        return row[0]
+
+    # Compatibilidad con registros de versiones anteriores.
+    old = DB.execute(
+        "SELECT status FROM job_status WHERE job_key=?",
+        (key,)
+    ).fetchone()
+
+    return old[0] if old else "Nueva"
+
+def get_job_dates(key):
+    row = DB.execute(
+        """
+        SELECT first_seen, saved_at, applied_at, discarded_at, updated_at
+        FROM tracked_jobs
+        WHERE job_key=?
+        """,
+        (key,)
+    ).fetchone()
+
+    if not row:
+        return {
+            "first_seen": None,
+            "saved_at": None,
+            "applied_at": None,
+            "discarded_at": None,
+            "updated_at": None,
+        }
+
+    return {
+        "first_seen": row[0],
+        "saved_at": row[1],
+        "applied_at": row[2],
+        "discarded_at": row[3],
+        "updated_at": row[4],
+    }
+
+def set_status(key, status):
+    stamp = now_iso()
+
+    row = DB.execute(
+        "SELECT status, saved_at, applied_at, discarded_at FROM tracked_jobs WHERE job_key=?",
+        (key,)
+    ).fetchone()
+
+    if not row:
+        # Si la oferta todavía no fue persistida, solo conserva estado legacy.
+        DB.execute("""
+            INSERT INTO job_status(job_key,status,updated_at)
+            VALUES(?,?,?)
+            ON CONFLICT(job_key)
+            DO UPDATE SET status=excluded.status, updated_at=excluded.updated_at
+        """, (key,status,stamp))
+        DB.commit()
+        return
+
+    old_status, saved_at, applied_at, discarded_at = row
+
+    if status == "Guardada" and not saved_at:
+        saved_at = stamp
+
+    if status == "Postulada" and not applied_at:
+        applied_at = stamp
+
+    if status == "Descartada" and not discarded_at:
+        discarded_at = stamp
+
+    # Si vuelve a Nueva, no borramos fechas históricas.
+    DB.execute("""
+        UPDATE tracked_jobs
+        SET status=?,
+            saved_at=?,
+            applied_at=?,
+            discarded_at=?,
+            updated_at=?
+        WHERE job_key=?
+    """, (
+        status,
+        saved_at,
+        applied_at,
+        discarded_at,
+        stamp,
+        key
+    ))
+
     DB.execute("""
         INSERT INTO job_status(job_key,status,updated_at)
         VALUES(?,?,?)
         ON CONFLICT(job_key)
-        DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at
-    """,(key,status,datetime.now().isoformat()))
+        DO UPDATE SET status=excluded.status, updated_at=excluded.updated_at
+    """, (key,status,stamp))
+
     DB.commit()
+
+def persist_jobs(df):
+    """Acumula ofertas reales encontradas sin eliminar resultados anteriores."""
+    if df is None or df.empty:
+        return
+
+    stamp = now_iso()
+
+    for _, row in df.iterrows():
+        if bool(row.get("_fallback", False)):
+            continue
+
+        key = row["_key"]
+
+        payload = {
+            "Cargo": row.get("Cargo", ""),
+            "Empresa": row.get("Empresa", ""),
+            "Ubicación": row.get("Ubicación", ""),
+            "Fuente": row.get("Fuente", ""),
+            "Score": int(row.get("Score", 0) or 0),
+            "Renta": row.get("Renta", ""),
+            "RentaValor": (
+                None if pd.isna(row.get("RentaValor"))
+                else int(row.get("RentaValor"))
+            ),
+            "Pretension": row.get("Pretension", ""),
+            "PretensionNota": row.get("PretensionNota", ""),
+            "PretensionFuente": row.get("PretensionFuente", ""),
+            "ReferenciaURL": row.get("ReferenciaURL", ""),
+            "Modalidad": row.get("Modalidad", ""),
+            "Descripción": row.get("Descripción", ""),
+            "Skills": row.get("Skills", []) or [],
+            "Enlace": row.get("Enlace", ""),
+        }
+
+        existing = DB.execute(
+            "SELECT status, first_seen FROM tracked_jobs WHERE job_key=?",
+            (key,)
+        ).fetchone()
+
+        if existing:
+            DB.execute("""
+                UPDATE tracked_jobs
+                SET payload_json=?, last_seen=?, updated_at=?
+                WHERE job_key=?
+            """, (
+                json.dumps(payload, ensure_ascii=False),
+                stamp,
+                stamp,
+                key
+            ))
+        else:
+            legacy_status = get_status(key)
+            DB.execute("""
+                INSERT INTO tracked_jobs(
+                    job_key, payload_json, status,
+                    first_seen, last_seen, updated_at
+                )
+                VALUES(?,?,?,?,?,?)
+            """, (
+                key,
+                json.dumps(payload, ensure_ascii=False),
+                legacy_status,
+                stamp,
+                stamp,
+                stamp
+            ))
+
+    DB.commit()
+
+def load_tracked_jobs(status=None):
+    if status:
+        rows = DB.execute("""
+            SELECT job_key, payload_json, status,
+                   first_seen, last_seen, saved_at,
+                   applied_at, discarded_at, updated_at
+            FROM tracked_jobs
+            WHERE status=?
+            ORDER BY updated_at DESC
+        """, (status,)).fetchall()
+    else:
+        rows = DB.execute("""
+            SELECT job_key, payload_json, status,
+                   first_seen, last_seen, saved_at,
+                   applied_at, discarded_at, updated_at
+            FROM tracked_jobs
+            ORDER BY last_seen DESC
+        """).fetchall()
+
+    data = []
+
+    for row in rows:
+        payload = json.loads(row[1])
+
+        payload.update({
+            "_key": row[0],
+            "Estado": row[2],
+            "FechaEncontrada": row[3],
+            "UltimaVezVista": row[4],
+            "FechaGuardada": row[5],
+            "FechaPostulacion": row[6],
+            "FechaDescarte": row[7],
+            "FechaActualizacion": row[8],
+            "_fallback": False,
+        })
+
+        data.append(payload)
+
+    if not data:
+        return pd.DataFrame()
+
+    return pd.DataFrame(data)
+
+def tracked_counts():
+    total = DB.execute(
+        "SELECT COUNT(*) FROM tracked_jobs"
+    ).fetchone()[0]
+
+    counts = {"Resultados": total}
+
+    for status, label in [
+        ("Guardada", "Guardadas"),
+        ("Postulada", "Postuladas"),
+        ("Descartada", "Descartadas"),
+    ]:
+        counts[label] = DB.execute(
+            "SELECT COUNT(*) FROM tracked_jobs WHERE status=?",
+            (status,)
+        ).fetchone()[0]
+
+    return counts
+
+def applications_excel_bytes(df):
+    """Genera Excel de postulaciones para descarga."""
+    if df is None or df.empty:
+        return None
+
+    export = pd.DataFrame({
+        "Fecha postulación": df["FechaPostulacion"].fillna(""),
+        "Cargo": df["Cargo"].fillna(""),
+        "Empresa": df["Empresa"].fillna(""),
+        "Ubicación": df["Ubicación"].fillna(""),
+        "Modalidad": df["Modalidad"].fillna(""),
+        "% ajuste CV": df["Score"].fillna(0),
+        "Renta publicada": df["Renta"].fillna(""),
+        "Pretensión sugerida": df["Pretension"].fillna(""),
+        "Fuente salarial": df["PretensionFuente"].fillna(""),
+        "Fuente oferta": df["Fuente"].fillna(""),
+        "Estado": df["Estado"].fillna(""),
+        "Fecha encontrada": df["FechaEncontrada"].fillna(""),
+        "Última actualización": df["FechaActualizacion"].fillna(""),
+        "Enlace": df["Enlace"].fillna(""),
+    })
+
+    output = BytesIO()
+
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        export.to_excel(
+            writer,
+            sheet_name="Postulaciones",
+            index=False
+        )
+
+        workbook = writer.book
+        sheet = writer.sheets["Postulaciones"]
+
+        header_fmt = workbook.add_format({
+            "bold": True,
+            "font_color": "#FFFFFF",
+            "bg_color": "#123B63",
+            "border": 0,
+            "align": "center",
+            "valign": "vcenter",
+        })
+
+        date_fmt = workbook.add_format({
+            "num_format": "dd-mm-yyyy hh:mm",
+        })
+
+        pct_fmt = workbook.add_format({
+            "num_format": '0"%"',
+            "align": "center",
+        })
+
+        for col_num, value in enumerate(export.columns.values):
+            sheet.write(0, col_num, value, header_fmt)
+
+        widths = {
+            0: 20, 1: 34, 2: 26, 3: 25, 4: 20,
+            5: 13, 6: 22, 7: 24, 8: 22, 9: 18,
+            10: 16, 11: 20, 12: 20, 13: 55
+        }
+
+        for col, width in widths.items():
+            sheet.set_column(col, col, width)
+
+        sheet.freeze_panes(1, 0)
+        sheet.autofilter(0, 0, len(export), len(export.columns)-1)
+
+        # Formato condicional sobre ajuste.
+        sheet.conditional_format(
+            1, 5, len(export), 5,
+            {
+                "type": "3_color_scale",
+                "min_color": "#F8D7DA",
+                "mid_color": "#FFF3CD",
+                "max_color": "#D1E7DD",
+            }
+        )
+
+        sheet.set_column(5, 5, 13, pct_fmt)
+
+    output.seek(0)
+    return output.getvalue()
 
 def norm(t):
     return re.sub(r"\s+"," ",(t or "").lower()).strip()
@@ -1014,21 +1338,42 @@ def build_df(jobs):
 # SIDEBAR
 # ==========================================================
 with st.sidebar:
+    counts = tracked_counts()
+
     st.markdown("""
     <div class="brand">
         <div class="brand-icon">💼</div>
         <div class="brand-title">Buscador Laboral<br>Paulina Vergara</div>
     </div>
-    <div class="nav-active">🏠 &nbsp; Inicio</div>
-    <div class="nav-item">🔎 &nbsp; Resultados</div>
-    <div class="nav-item">⭐ &nbsp; Guardadas</div>
-    <div class="nav-item">✅ &nbsp; Postuladas</div>
-    <div class="nav-item">🗑️ &nbsp; Descartadas</div>
-    <div class="nav-item">🕘 &nbsp; Historial</div>
-    """,unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
+    if "page" not in st.session_state:
+        st.session_state["page"] = "Inicio"
+
+    nav_items = [
+        ("🏠", "Inicio", None),
+        ("🔎", "Resultados", counts["Resultados"]),
+        ("⭐", "Guardadas", counts["Guardadas"]),
+        ("✅", "Postuladas", counts["Postuladas"]),
+        ("🗑️", "Descartadas", counts["Descartadas"]),
+    ]
+
+    for icon, label, count in nav_items:
+        button_label = f"{icon}  {label}"
+        if count is not None:
+            button_label += f"  ({count})"
+
+        if st.button(
+            button_label,
+            key=f"nav_{label}",
+            use_container_width=True,
+            type="primary" if st.session_state["page"] == label else "secondary"
+        ):
+            st.session_state["page"] = label
+            st.rerun()
 
     st.markdown('<div class="sidebar-section">CV de búsqueda</div>', unsafe_allow_html=True)
+
 
     uploaded_cv = st.file_uploader(
         "Subir nuevo CV",
@@ -1200,12 +1545,17 @@ if st.button("🔎 BUSCAR OFERTAS DE HOY",type="primary",use_container_width=Tru
         st.session_state["mode"] = "live"
         st.session_state["errors"] = errors
         st.session_state["found_count"] = len(live)
+
+        live_df_to_save = build_df(live)
+        persist_jobs(live_df_to_save)
+        st.session_state["page"] = "Resultados"
     else:
         fallback = fallback_links()
         st.session_state["jobs"] = fallback
         st.session_state["mode"] = "fallback"
         st.session_state["errors"] = errors
         st.session_state["found_count"] = len(fallback)
+        st.session_state["page"] = "Resultados"
 
     st.rerun()
 
@@ -1336,173 +1686,340 @@ elif mode == "fallback":
                 st.write("•",e)
 
 # ==========================================================
-# RESULTADOS
+# VISTAS / GESTIÓN DE POSTULACIONES
 # ==========================================================
-if jobs:
-    if mode == "live":
-        sort_base = preview_df.copy()
-        sort_base["_TieneRenta"] = sort_base["RentaValor"].notna().astype(int)
+page = st.session_state.get("page", "Inicio")
+counts = tracked_counts()
 
-        if sort_option == "Mayor % de ajuste":
-            if prefer_salary:
-                df = sort_base.sort_values(
-                    ["_TieneRenta","Score","Empresa"],
-                    ascending=[False,False,True],
-                    na_position="last"
+def apply_current_filters(df):
+    if df is None or df.empty:
+        return df
+
+    filtered = df.copy()
+
+    if not show_low and "Score" in filtered.columns:
+        filtered = filtered[filtered["Score"] >= min_score]
+
+    if not show_below and "RentaValor" in filtered.columns:
+        filtered = filtered[
+            filtered["RentaValor"].isna() |
+            (filtered["RentaValor"] >= salary_min)
+        ]
+
+    if salary_max is not None and "RentaValor" in filtered.columns:
+        filtered = filtered[
+            filtered["RentaValor"].isna() |
+            (filtered["RentaValor"] <= salary_max) |
+            (filtered["RentaValor"] >= TARGET_PLUS)
+        ]
+
+    if only_salary and "RentaValor" in filtered.columns:
+        filtered = filtered[filtered["RentaValor"].notna()]
+
+    modes = []
+    if hybrid:
+        modes.append("Híbrido")
+    if remote:
+        modes.append("Remoto")
+    if onsite:
+        modes.append("Presencial / no informado")
+
+    if modes and "Modalidad" in filtered.columns:
+        filtered = filtered[filtered["Modalidad"].isin(modes)]
+    elif not modes:
+        filtered = filtered.iloc[0:0]
+
+    if only_new and "Estado" in filtered.columns:
+        filtered = filtered[filtered["Estado"] == "Nueva"]
+
+    return filtered
+
+def sort_jobs(df):
+    if df is None or df.empty:
+        return df
+
+    out = df.copy()
+    out["_TieneRenta"] = out["RentaValor"].notna().astype(int)
+
+    if sort_option == "Mayor % de ajuste":
+        if prefer_salary:
+            return out.sort_values(
+                ["_TieneRenta","Score","Empresa"],
+                ascending=[False,False,True],
+                na_position="last"
+            )
+        return out.sort_values(
+            ["Score","Empresa"],
+            ascending=[False,True],
+            na_position="last"
+        )
+
+    if sort_option == "Menor % de ajuste":
+        return out.sort_values(
+            ["Score","Empresa"],
+            ascending=[True,True],
+            na_position="last"
+        )
+
+    if sort_option == "Renta publicada: mayor a menor":
+        return out.sort_values(
+            ["RentaValor","Score"],
+            ascending=[False,False],
+            na_position="last"
+        )
+
+    return out.sort_values(
+        ["Empresa","Score"],
+        ascending=[True,False],
+        na_position="last"
+    )
+
+def action_button(label, key, job_key, new_status):
+    if st.button(label, key=key, use_container_width=True):
+        set_status(job_key, new_status)
+        st.rerun()
+
+def render_job_cards(data, context="Resultados"):
+    if data is None or data.empty:
+        st.info("No hay cargos en esta sección.")
+        return
+
+    for _, r in data.iterrows():
+        with st.container(border=True):
+            left, right = st.columns([5, 1.35])
+
+            with left:
+                score = int(r.get("Score", 0) or 0)
+                st.markdown(
+                    f"<div class='job-title'>{r.get('Cargo','')} "
+                    f"<span class='badge-green'>{score}% de ajuste</span></div>",
+                    unsafe_allow_html=True
                 )
-            else:
-                df = sort_base.sort_values(
-                    ["Score","Empresa"],
-                    ascending=[False,True],
-                    na_position="last"
+
+                st.markdown(
+                    f"<div class='job-meta'><b>{r.get('Empresa','')}</b> · "
+                    f"{r.get('Ubicación','')} · {r.get('Modalidad','')}</div>",
+                    unsafe_allow_html=True
                 )
-        elif sort_option == "Menor % de ajuste":
-            df = sort_base.sort_values(
-                ["Score","Empresa"],
-                ascending=[True,True],
-                na_position="last"
-            )
-        elif sort_option == "Renta publicada: mayor a menor":
-            df = sort_base.sort_values(
-                ["RentaValor","Score"],
-                ascending=[False,False],
-                na_position="last"
-            )
-        else:
-            df = sort_base.sort_values(
-                ["Empresa","Score"],
-                ascending=[True,False],
-                na_position="last"
-            )
-    else:
-        df = all_df
 
-    tabs = st.tabs([
-        f"Resultados ({len(df)})",
-        f"Guardadas ({int((df['Estado']=='Guardada').sum()) if not df.empty else 0})",
-        f"Postuladas ({int((df['Estado']=='Postulada').sum()) if not df.empty else 0})",
-        f"Descartadas ({int((df['Estado']=='Descartada').sum()) if not df.empty else 0})"
-    ])
+                salary = r.get("Renta", "Sin renta publicada")
+                st.markdown(
+                    f"<div class='salary-line'>💵 <b>Renta publicada:</b> {salary} &nbsp;&nbsp; "
+                    f"🎯 <b>Pretensión sugerida:</b> {r.get('Pretension','')}</div>",
+                    unsafe_allow_html=True
+                )
 
-    def render(data,status=None):
-        view = data if not status else data[data["Estado"]==status]
+                if r.get("FechaPostulacion"):
+                    fecha = str(r.get("FechaPostulacion")).replace("T", " ")
+                    st.markdown(
+                        f"<div class='salary-line'>📅 <b>Postulada:</b> {fecha}</div>",
+                        unsafe_allow_html=True
+                    )
 
-        if view.empty:
-            st.info("No hay elementos en esta sección.")
-            return
+                if r.get("FechaGuardada") and context == "Guardadas":
+                    fecha = str(r.get("FechaGuardada")).replace("T", " ")
+                    st.markdown(
+                        f"<div class='salary-line'>⭐ <b>Guardada:</b> {fecha}</div>",
+                        unsafe_allow_html=True
+                    )
 
-        for _,r in view.iterrows():
+                if r.get("FechaDescarte") and context == "Descartadas":
+                    fecha = str(r.get("FechaDescarte")).replace("T", " ")
+                    st.markdown(
+                        f"<div class='salary-line'>🗑️ <b>Descartada:</b> {fecha}</div>",
+                        unsafe_allow_html=True
+                    )
+
+                desc = r.get("Descripción", "")
+                if desc:
+                    st.markdown(
+                        f"<div class='muted'>{desc[:380]}"
+                        f"{'...' if len(desc)>380 else ''}</div>",
+                        unsafe_allow_html=True
+                    )
+
+                skills = r.get("Skills", []) or []
+                if skills:
+                    chips = "".join(
+                        f"<span class='badge-blue'>{s}</span>"
+                        for s in skills
+                    )
+                    st.markdown(chips, unsafe_allow_html=True)
+
+            with right:
+                link = r.get("Enlace", "")
+                key = r["_key"]
+
+                if link:
+                    st.link_button(
+                        "🔗 Ver oferta",
+                        link,
+                        use_container_width=True
+                    )
+
+                if context == "Resultados":
+                    if r.get("Estado") != "Guardada":
+                        action_button(
+                            "⭐ Guardar",
+                            f"save_{abs(hash(key))}",
+                            key,
+                            "Guardada"
+                        )
+
+                    if r.get("Estado") != "Postulada":
+                        action_button(
+                            "✅ Postular",
+                            f"apply_{abs(hash(key))}",
+                            key,
+                            "Postulada"
+                        )
+
+                    action_button(
+                        "🗑️ Descartar",
+                        f"discard_{abs(hash(key))}",
+                        key,
+                        "Descartada"
+                    )
+
+                elif context == "Guardadas":
+                    action_button(
+                        "✅ Marcar postulada",
+                        f"saved_apply_{abs(hash(key))}",
+                        key,
+                        "Postulada"
+                    )
+
+                    action_button(
+                        "🗑️ Descartar",
+                        f"saved_discard_{abs(hash(key))}",
+                        key,
+                        "Descartada"
+                    )
+
+                    action_button(
+                        "↩️ Quitar guardado",
+                        f"saved_new_{abs(hash(key))}",
+                        key,
+                        "Nueva"
+                    )
+
+                elif context == "Postuladas":
+                    action_button(
+                        "🗑️ Descartar",
+                        f"post_discard_{abs(hash(key))}",
+                        key,
+                        "Descartada"
+                    )
+
+                    action_button(
+                        "⭐ Guardar",
+                        f"post_save_{abs(hash(key))}",
+                        key,
+                        "Guardada"
+                    )
+
+                elif context == "Descartadas":
+                    action_button(
+                        "↩️ Recuperar",
+                        f"discard_restore_{abs(hash(key))}",
+                        key,
+                        "Nueva"
+                    )
+
+                    action_button(
+                        "✅ Postular",
+                        f"discard_apply_{abs(hash(key))}",
+                        key,
+                        "Postulada"
+                    )
+
+# ---------- INICIO ----------
+if page == "Inicio":
+    st.markdown("### Resumen de tu búsqueda laboral")
+
+    a, b, c, d = st.columns(4)
+    a.metric("Ofertas acumuladas", counts["Resultados"])
+    b.metric("Guardadas", counts["Guardadas"])
+    c.metric("Postuladas", counts["Postuladas"])
+    d.metric("Descartadas", counts["Descartadas"])
+
+    st.info(
+        "Las búsquedas nuevas se acumulan. Una oferta ya encontrada no se elimina "
+        "cuando vuelves a ejecutar la búsqueda."
+    )
+
+# ---------- RESULTADOS ----------
+elif page == "Resultados":
+    st.markdown(f"### 🔎 Resultados acumulados ({counts['Resultados']})")
+
+    tracked = load_tracked_jobs()
+    visible = apply_current_filters(tracked)
+    visible = sort_jobs(visible)
+
+    st.caption(
+        f"Mostrando {len(visible)} de {len(tracked)} ofertas acumuladas según tus filtros."
+    )
+
+    render_job_cards(visible, "Resultados")
+
+    # Si falló la búsqueda integrada, conservamos accesos directos de respaldo.
+    if mode == "fallback" and jobs:
+        st.markdown("### 🌐 Búsquedas directas de respaldo")
+        fallback_df = build_df(jobs)
+        for _, r in fallback_df.iterrows():
             with st.container(border=True):
-                left,right = st.columns([5,1])
-
-                with left:
-                    st.markdown(
-                        f"<div class='job-title'>{r['Cargo']} "
-                        f"<span class='badge-green'>{r['Score']}% de ajuste</span></div>",
-                        unsafe_allow_html=True
-                    )
-
-                    st.markdown(
-                        f"<div class='job-meta'><b>{r['Empresa']}</b> · "
-                        f"{r['Ubicación']} · {r['Modalidad']}</div>",
-                        unsafe_allow_html=True
-                    )
-
-                    if r["_fallback"]:
-                        st.markdown(
-                            f"<div class='salary-line'>🌐 Fuente: {r['Fuente']}</div>",
-                            unsafe_allow_html=True
-                        )
-                        st.markdown(
-                            f"<div class='salary-line'>🎯 <b>Pretensión orientativa:</b> "
-                            f"{r['Pretension']} <span style='color:#6D7D8D;'>· "
-                            f"{r['PretensionNota']}</span></div>",
-                            unsafe_allow_html=True
-                        )
-                    else:
-                        salary_tag = (
-                            "2,5M+"
-                            if r["RentaValor"] is not None and r["RentaValor"] >= TARGET_PLUS
-                            else r["Renta"]
-                        )
-
-                        st.markdown(
-                            f"<div class='salary-line'>💵 <b>Renta publicada:</b> {salary_tag} &nbsp;&nbsp; "
-                            f"🏢 {r['Modalidad']}</div>",
-                            unsafe_allow_html=True
-                        )
-
-                        st.markdown(
-                            f"<div class='salary-line'>🎯 <b>Pretensión sugerida:</b> "
-                            f"{r['Pretension']} "
-                            f"<span style='color:#6D7D8D;'>· {r['PretensionNota']} "
-                            f"({r['PretensionFuente']})</span></div>",
-                            unsafe_allow_html=True
-                        )
-
-                        if r["ReferenciaURL"] and r["Renta"] == "Sin renta publicada":
-                            st.markdown(
-                                f"<div class='muted'>Referencia de mercado: "
-                                f"<a href='{r['ReferenciaURL']}' target='_blank'>ver fuente salarial</a>"
-                                f"</div>",
-                                unsafe_allow_html=True
-                            )
-
-                    if r["Descripción"]:
-                        t = r["Descripción"]
-                        st.markdown(
-                            f"<div class='muted'>{t[:360]}{'...' if len(t)>360 else ''}</div>",
-                            unsafe_allow_html=True
-                        )
-
-                    if r["Skills"]:
-                        chips = "".join(
-                            f"<span class='badge-blue'>{s}</span>"
-                            for s in r["Skills"]
-                        )
-                        st.markdown(chips,unsafe_allow_html=True)
-
-                with right:
-                    if r["Enlace"]:
+                c1, c2 = st.columns([5,1])
+                with c1:
+                    st.markdown(f"**{r['Cargo']}** · {r['Empresa']}")
+                    st.caption(r.get("Descripción",""))
+                with c2:
+                    if r.get("Enlace"):
                         st.link_button(
-                            "Ver oferta" if not r["_fallback"] else "Abrir búsqueda",
+                            "Abrir búsqueda",
                             r["Enlace"],
                             use_container_width=True
                         )
 
-                    if not r["_fallback"]:
-                        values = ["Nueva","Guardada","Postulada","Descartada"]
-                        selected = st.selectbox(
-                            "Estado",
-                            values,
-                            index=values.index(r["Estado"]),
-                            key=f"state_{abs(hash(r['_key']))}"
-                        )
+# ---------- GUARDADAS ----------
+elif page == "Guardadas":
+    df_guardadas = load_tracked_jobs("Guardada")
+    st.markdown(f"### ⭐ Guardadas ({len(df_guardadas)})")
+    st.caption(
+        "Aquí quedan las ofertas que quieres revisar o postular más adelante."
+    )
+    render_job_cards(sort_jobs(df_guardadas), "Guardadas")
 
-                        if selected != r["Estado"]:
-                            set_status(r["_key"],selected)
-                            st.rerun()
+# ---------- POSTULADAS ----------
+elif page == "Postuladas":
+    df_postuladas = load_tracked_jobs("Postulada")
+    st.markdown(f"### ✅ Postuladas ({len(df_postuladas)})")
+    st.caption(
+        "La fecha se registra automáticamente cuando marcas una oferta como Postulada."
+    )
 
-    with tabs[0]:
-        render(df)
+    if not df_postuladas.empty:
+        excel_bytes = applications_excel_bytes(df_postuladas)
 
-    with tabs[1]:
-        render(df,"Guardada")
+        if excel_bytes:
+            st.download_button(
+                "📊 Descargar Excel de postulaciones",
+                data=excel_bytes,
+                file_name=f"Postulaciones_Paulina_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=False
+            )
 
-    with tabs[2]:
-        render(df,"Postulada")
+    render_job_cards(sort_jobs(df_postuladas), "Postuladas")
 
-    with tabs[3]:
-        render(df,"Descartada")
-
-else:
-    st.markdown("""
-    ### Cómo usarla
-    1. Presiona **BUSCAR OFERTAS DE HOY**.
-    2. Usa los filtros laterales para ajustar compatibilidad, renta y modalidad.
-    3. Revisa primero los resultados con mayor compatibilidad.
-    4. Guarda, postula o descarta cada oportunidad.
-    """)
+# ---------- DESCARTADAS ----------
+elif page == "Descartadas":
+    df_descartadas = load_tracked_jobs("Descartada")
+    st.markdown(f"### 🗑️ Descartadas ({len(df_descartadas)})")
+    st.caption(
+        "Puedes mover aquí las postulaciones cuando recibas una respuesta negativa "
+        "o cuando decidas no continuar. También puedes recuperarlas."
+    )
+    render_job_cards(sort_jobs(df_descartadas), "Descartadas")
 
 st.markdown("---")
 st.caption(
