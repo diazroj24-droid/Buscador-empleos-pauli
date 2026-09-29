@@ -2096,19 +2096,93 @@ elif page == "Resultados":
     render_job_cards(visible, "Resultados")
 
     # Si falló la búsqueda integrada, conservamos accesos directos de respaldo.
+    # Estas tarjetas también muestran pretensión y referencia salarial.
     if mode == "fallback" and jobs:
         st.markdown("### 🌐 Búsquedas directas de respaldo")
+        st.caption(
+            "Estas son búsquedas por portal, no ofertas individuales. "
+            "La pretensión mostrada es una referencia orientativa para el tipo de cargo."
+        )
+
         fallback_df = build_df(jobs)
+
         for _, r in fallback_df.iterrows():
             with st.container(border=True):
-                c1, c2 = st.columns([5,1])
+                c1, c2 = st.columns([5.2, 1.2])
+
                 with c1:
-                    st.markdown(f"**{r['Cargo']}** · {r['Empresa']}")
-                    st.caption(r.get("Descripción",""))
+                    score = int(r.get("Score", 0) or 0)
+                    icon = "🟢" if score >= 80 else ("🟠" if score >= 65 else "⚪")
+
+                    st.markdown(
+                        f"### {r.get('Cargo','')} — {r.get('Empresa','')}"
+                    )
+
+                    st.markdown(
+                        f"{icon} **{score}% de ajuste**"
+                    )
+
+                    st.markdown(
+                        "💵 **Renta publicada:** Sin renta publicada"
+                    )
+
+                    pretension = r.get("Pretension", "") or "No calculada"
+                    st.markdown(
+                        f"🎯 **Pretensión sugerida:** {pretension}"
+                    )
+
+                    note = (r.get("PretensionNota", "") or "").replace("Referencia:", "").strip()
+                    source = r.get("PretensionFuente", "") or ""
+
+                    if source == "Aviso publicado":
+                        st.markdown(
+                            "**Referencia salarial:** banda informada en el aviso"
+                        )
+                        st.caption(
+                            "Criterio: estimación basada en la banda salarial publicada "
+                            "y en tu rango objetivo."
+                        )
+                    elif source and source != "Perfil de búsqueda":
+                        ref_text = note if note else "Mercado chileno para cargos comparables"
+                        st.markdown(
+                            f"**Referencia salarial:** {ref_text} — {source}"
+                        )
+                        st.caption(
+                            "Criterio: estimación orientativa según mercado chileno, "
+                            "seniority del cargo y rango objetivo configurado."
+                        )
+                    else:
+                        st.markdown(
+                            f"**Referencia salarial:** "
+                            f"{note or 'Sin referencia específica para este cargo'}"
+                        )
+                        st.caption(
+                            "Criterio: estimación basada principalmente en el rango "
+                            "de renta configurado en tu búsqueda."
+                        )
+
+                    st.caption(
+                        f"📍 {r.get('Ubicación','')} · "
+                        f"🌐 Fuente: {r.get('Fuente','')}"
+                    )
+
+                    descripcion = r.get("Descripción", "") or ""
+                    if descripcion:
+                        st.markdown(
+                            f"<div class='muted'>{descripcion}</div>",
+                            unsafe_allow_html=True
+                        )
+
+                    ref_url = r.get("ReferenciaURL", "") or ""
+                    if ref_url:
+                        st.markdown(
+                            f"[Ver referencia salarial]({ref_url})"
+                        )
+
                 with c2:
                     if r.get("Enlace"):
                         st.link_button(
-                            "Abrir búsqueda",
+                            "🔎 Abrir búsqueda",
                             r["Enlace"],
                             use_container_width=True
                         )
