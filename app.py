@@ -735,6 +735,19 @@ def get_db():
         )
     """)
 
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS saved_searches(
+            search_key TEXT PRIMARY KEY,
+            cargo TEXT,
+            fuente TEXT,
+            ubicacion TEXT,
+            enlace TEXT,
+            pretension TEXT,
+            referencia TEXT,
+            saved_at TEXT
+        )
+    """)
+
     conn.commit()
     return conn
 
@@ -1031,6 +1044,65 @@ def tracked_counts():
         ).fetchone()[0]
 
     return counts
+
+def save_fallback_search(row):
+    key = f"{row.get('Cargo','')}|{row.get('Empresa','')}|{row.get('Fuente','')}"
+    note = (row.get("PretensionNota", "") or "").replace("Referencia:", "").strip()
+    source = row.get("PretensionFuente", "") or ""
+    referencia = f"{note} — {source}".strip(" —")
+
+    DB.execute("""
+        INSERT INTO saved_searches(
+            search_key, cargo, fuente, ubicacion,
+            enlace, pretension, referencia, saved_at
+        )
+        VALUES(?,?,?,?,?,?,?,?)
+        ON CONFLICT(search_key)
+        DO UPDATE SET
+            cargo=excluded.cargo,
+            fuente=excluded.fuente,
+            ubicacion=excluded.ubicacion,
+            enlace=excluded.enlace,
+            pretension=excluded.pretension,
+            referencia=excluded.referencia,
+            saved_at=excluded.saved_at
+    """, (
+        key,
+        row.get("Cargo",""),
+        row.get("Fuente",""),
+        row.get("Ubicación",""),
+        row.get("Enlace",""),
+        row.get("Pretension",""),
+        referencia,
+        now_iso()
+    ))
+    DB.commit()
+
+def load_saved_searches():
+    rows = DB.execute("""
+        SELECT search_key, cargo, fuente, ubicacion,
+               enlace, pretension, referencia, saved_at
+        FROM saved_searches
+        ORDER BY saved_at DESC
+    """).fetchall()
+
+    return [
+        {
+            "search_key": r[0],
+            "cargo": r[1],
+            "fuente": r[2],
+            "ubicacion": r[3],
+            "enlace": r[4],
+            "pretension": r[5],
+            "referencia": r[6],
+            "saved_at": r[7],
+        }
+        for r in rows
+    ]
+
+def delete_saved_search(search_key):
+    DB.execute("DELETE FROM saved_searches WHERE search_key=?", (search_key,))
+    DB.commit()
 
 def applications_excel_bytes(df):
     """Genera Excel de postulaciones para descarga."""
@@ -1418,10 +1490,12 @@ with st.sidebar:
     if "page" not in st.session_state:
         st.session_state["page"] = "Inicio"
 
+    saved_search_count = len(load_saved_searches())
+
     nav_items = [
         ("🏠", "Inicio", None),
         ("🔎", "Resultados", counts["Resultados"]),
-        ("⭐", "Guardadas", counts["Guardadas"]),
+        ("⭐", "Guardadas", counts["Guardadas"] + saved_search_count),
         ("✅", "Postuladas", counts["Postuladas"]),
         ("🗑️", "Descartadas", counts["Descartadas"]),
     ]
@@ -1982,6 +2056,16 @@ def render_job_cards(data, context="Resultados"):
                 link = r.get("Enlace", "")
                 key = r["_key"]
 
+                estado_actual = r.get("Estado", "Nueva")
+                estado_icono = {
+                    "Nueva": "🆕",
+                    "Guardada": "⭐",
+                    "Postulada": "✅",
+                    "Descartada": "🗑️",
+                }.get(estado_actual, "•")
+
+                st.caption(f"{estado_icono} Estado: {estado_actual}")
+
                 if link:
                     st.link_button(
                         "🔗 Ver oferta",
@@ -2187,14 +2271,55 @@ elif page == "Resultados":
                             use_container_width=True
                         )
 
+                    if st.button(
+                        "⭐ Guardar búsqueda",
+                        key=f"save_fallback_{abs(hash(str(r.get('Cargo','')) + str(r.get('Empresa','')) + str(r.get('Fuente',''))))}",
+                        use_container_width=True
+                    ):
+                        save_fallback_search(r)
+                        st.success("Búsqueda guardada.")
+                        st.rerun()
+
 # ---------- GUARDADAS ----------
 elif page == "Guardadas":
     df_guardadas = load_tracked_jobs("Guardada")
-    st.markdown(f"### ⭐ Guardadas ({len(df_guardadas)})")
+    saved_searches = load_saved_searches()
+    total_saved = len(df_guardadas) + len(saved_searches)
+
+    st.markdown(f"### ⭐ Guardadas ({total_saved})")
     st.caption(
-        "Aquí quedan las ofertas que quieres revisar o postular más adelante."
+        "Aquí quedan las ofertas y búsquedas que quieres revisar más adelante."
     )
-    render_job_cards(sort_jobs(df_guardadas), "Guardadas")
+
+    if not df_guardadas.empty:
+        st.markdown("#### Ofertas guardadas")
+        render_job_cards(sort_jobs(df_guardadas), "Guardadas")
+
+    if saved_searches:
+        st.markdown("#### Búsquedas guardadas")
+        for item in saved_searches:
+            with st.container(border=True):
+                c1, c2 = st.columns([5,1.3])
+                with c1:
+                    st.markdown(f"**{item['cargo']} — {item['fuente']}**")
+                    st.caption(f"📍 {item['ubicacion']} · ⭐ Guardada: {item['saved_at'].replace('T',' ')}")
+                    if item["pretension"]:
+                        st.markdown(f"🎯 **Pretensión orientativa:** {item['pretension']}")
+                    if item["referencia"]:
+                        st.markdown(f"**Referencia salarial:** {item['referencia']}")
+                with c2:
+                    if item["enlace"]:
+                        st.link_button("🔎 Abrir búsqueda", item["enlace"], use_container_width=True)
+                    if st.button(
+                        "🗑️ Quitar",
+                        key=f"del_search_{abs(hash(item['search_key']))}",
+                        use_container_width=True
+                    ):
+                        delete_saved_search(item["search_key"])
+                        st.rerun()
+
+    if df_guardadas.empty and not saved_searches:
+        st.info("No hay elementos guardados.")
 
 # ---------- POSTULADAS ----------
 elif page == "Postuladas":
