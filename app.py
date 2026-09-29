@@ -415,13 +415,87 @@ def profile_from_cv(cv_text):
         "skills": skills if skills else DEFAULT_PROFILE["skills"].copy()
     }, queries
 
+def extra_skills():
+    raw = st.session_state.get("extra_skills_editor", "")
+    parts = re.split(r"[,;\n]+", raw)
+    return [p.strip() for p in parts if p.strip()]
+
 def active_profile():
-    return st.session_state.get("active_profile", DEFAULT_PROFILE)
+    base = st.session_state.get("active_profile", DEFAULT_PROFILE)
+    profile = {
+        "roles": list(base.get("roles", [])),
+        "skills": list(base.get("skills", []))
+    }
+
+    # Las habilidades escritas manualmente impactan el % de ajuste.
+    for skill in extra_skills():
+        if skill.lower() not in [x.lower() for x in profile["skills"]]:
+            profile["skills"].append(skill)
+
+    return profile
+
+def selected_work_modes():
+    modes = []
+    if st.session_state.get("filter_hybrid", True):
+        modes.append("Híbrido")
+    if st.session_state.get("filter_remote", True):
+        modes.append("Remoto")
+    if st.session_state.get("filter_onsite", False):
+        modes.append("Presencial / no informado")
+    return modes
 
 def active_queries():
     raw = st.session_state.get("query_editor", "")
-    queries = [q.strip() for q in raw.splitlines() if q.strip()]
-    return queries[:8] if queries else DEFAULT_SEARCH_QUERIES
+    base_queries = [q.strip() for q in raw.splitlines() if q.strip()]
+    if not base_queries:
+        base_queries = DEFAULT_SEARCH_QUERIES.copy()
+
+    queries = list(base_queries)
+
+    # Si el usuario agrega nuevas habilidades, se agregan búsquedas nuevas.
+    # Se limita la cantidad para no consumir excesivamente la API.
+    skills = extra_skills()[:4]
+    for skill in skills:
+        skill_low = skill.lower()
+
+        # Búsqueda especializada por habilidad.
+        q = f"{skill} procesos"
+        if q.lower() not in [x.lower() for x in queries]:
+            queries.append(q)
+
+        # Para habilidades BI / datos, agregar una consulta más específica.
+        if any(k in skill_low for k in ["power bi", "sql", "tableau", "python", "data", "datos"]):
+            q2 = f"analista {skill}"
+            if q2.lower() not in [x.lower() for x in queries]:
+                queries.append(q2)
+
+    # La modalidad seleccionada también influye en la búsqueda.
+    modes = selected_work_modes()
+    mode_suffix = ""
+    if modes == ["Remoto"]:
+        mode_suffix = " remoto"
+    elif modes == ["Híbrido"]:
+        mode_suffix = " híbrido"
+    elif modes == ["Presencial / no informado"]:
+        mode_suffix = " presencial"
+
+    if mode_suffix:
+        queries = [
+            q if mode_suffix.strip().lower() in q.lower()
+            else f"{q}{mode_suffix}"
+            for q in queries
+        ]
+
+    # Quitar duplicados preservando orden.
+    unique = []
+    seen = set()
+    for q in queries:
+        key = q.lower().strip()
+        if key and key not in seen:
+            seen.add(key)
+            unique.append(q.strip())
+
+    return unique[:12]
 
 TARGET_PLUS = 2_500_000
 
@@ -523,10 +597,23 @@ def detect_work_mode(job):
         f"{job.get('description','')} {' '.join(job.get('extensions',[]) or [])}"
     )
 
-    if "remoto" in text or "remote" in text:
-        return "Remoto"
-    if "híbrido" in text or "hibrido" in text or "hybrid" in text:
+    remote_terms = [
+        "remoto", "remote", "work from home", "home office",
+        "teletrabajo", "telecommute", "100% remoto", "100% remote"
+    ]
+    hybrid_terms = [
+        "híbrido", "hibrido", "hybrid", "modalidad mixta",
+        "semipresencial", "home office parcial"
+    ]
+
+    has_remote = any(term in text for term in remote_terms)
+    has_hybrid = any(term in text for term in hybrid_terms)
+
+    # Prioriza híbrido cuando el aviso explícitamente mezcla oficina y remoto.
+    if has_hybrid:
         return "Híbrido"
+    if has_remote:
+        return "Remoto"
 
     return "Presencial / no informado"
 
@@ -732,6 +819,7 @@ with st.sidebar:
         st.session_state["active_profile"] = DEFAULT_PROFILE.copy()
         st.session_state["active_cv_name"] = "CV inicial de Paulina"
         st.session_state["query_editor"] = "\n".join(DEFAULT_SEARCH_QUERIES)
+        st.session_state["extra_skills_editor"] = ""
         st.session_state.pop("jobs", None)
         st.session_state.pop("mode", None)
         st.session_state["found_count"] = 0
@@ -750,6 +838,26 @@ with st.sidebar:
 
     with st.expander("Ver habilidades detectadas"):
         st.write(" · ".join(active_profile()["skills"]))
+
+    if "extra_skills_editor" not in st.session_state:
+        st.session_state["extra_skills_editor"] = ""
+
+    st.text_area(
+        "Habilidades adicionales",
+        key="extra_skills_editor",
+        height=85,
+        placeholder="Ej: Tableau, Python, Power Automate",
+        help=(
+            "Sepáralas por coma o por línea. Estas habilidades aumentan el "
+            "alcance de la búsqueda y también influyen en el % de ajuste."
+        )
+    )
+
+    if st.session_state.get("extra_skills_editor", "").strip():
+        st.caption(
+            "🔎 La próxima búsqueda incluirá: "
+            + " · ".join(extra_skills())
+        )
 
     st.markdown('<div class="sidebar-section">Filtros de búsqueda</div>',unsafe_allow_html=True)
 
@@ -788,9 +896,26 @@ with st.sidebar:
     only_salary = st.checkbox("Solo con renta publicada",False)
 
     st.markdown('<div class="sidebar-section">Tipo de trabajo</div>',unsafe_allow_html=True)
-    hybrid = st.checkbox("Híbrido",True)
-    remote = st.checkbox("Remoto",True)
-    onsite = st.checkbox("Presencial",False)
+
+    hybrid = st.checkbox("Híbrido", value=True, key="filter_hybrid")
+    remote = st.checkbox("Remoto", value=True, key="filter_remote")
+    onsite = st.checkbox("Presencial", value=False, key="filter_onsite")
+
+    if not any([hybrid, remote, onsite]):
+        st.warning("Selecciona al menos una modalidad para ver resultados.")
+
+    st.markdown('<div class="sidebar-section">Ordenar resultados</div>',unsafe_allow_html=True)
+    sort_option = st.selectbox(
+        "Orden",
+        [
+            "Mayor % de ajuste",
+            "Menor % de ajuste",
+            "Renta publicada: mayor a menor",
+            "Empresa: A → Z"
+        ],
+        index=0,
+        label_visibility="collapsed"
+    )
 
 # ==========================================================
 # HEADER
@@ -801,9 +926,14 @@ st.caption("Procesos · Mejora Continua · Operaciones · CX · PMO · Control d
 st.markdown("""
 <div class="hero">
     <h2>Encuentra oportunidades que se ajusten a tu perfil</h2>
-    <p>Cargos en procesos, mejora continua, operaciones, experiencia cliente, PMO y control de gestión.</p>
+    <p>La búsqueda usa tu CV activo, tus cargos objetivo, habilidades adicionales y modalidad seleccionada.</p>
 </div>
 """,unsafe_allow_html=True)
+
+profile_now = active_profile()
+skills_preview = profile_now["skills"][:10]
+if skills_preview:
+    st.caption("🎯 Perfil activo: " + " · ".join(skills_preview))
 
 if st.button("🔎 BUSCAR OFERTAS DE HOY",type="primary",use_container_width=True):
     with st.spinner("Buscando oportunidades compatibles..."):
@@ -851,12 +981,18 @@ if mode == "live" and not all_df.empty:
         preview_df = preview_df[preview_df["RentaValor"].notna()]
 
     modes = []
-    if hybrid: modes.append("Híbrido")
-    if remote: modes.append("Remoto")
-    if onsite: modes.append("Presencial / no informado")
+    if hybrid:
+        modes.append("Híbrido")
+    if remote:
+        modes.append("Remoto")
+    if onsite:
+        modes.append("Presencial / no informado")
 
+    # El filtro es estricto: si marcas solo Remoto, verás solo Remoto.
     if modes:
         preview_df = preview_df[preview_df["Modalidad"].isin(modes)]
+    else:
+        preview_df = preview_df.iloc[0:0]
 
     if only_new:
         preview_df = preview_df[preview_df["Estado"]=="Nueva"]
@@ -925,7 +1061,7 @@ with c5:
     """,unsafe_allow_html=True)
 
 if mode == "live":
-    st.success(f"✅ Se encontraron {len(all_df)} ofertas únicas. Mostrando {len(preview_df)} según tus filtros.")
+    st.success(f"✅ Se encontraron {len(all_df)} ofertas únicas. Mostrando {len(preview_df)} según tus filtros. Orden: {sort_option}.")
 
     if errors:
         with st.expander(f"⚠️ {len(errors)} consulta(s) tuvieron problemas"):
@@ -947,11 +1083,33 @@ elif mode == "fallback":
 # RESULTADOS
 # ==========================================================
 if jobs:
-    df = (
-        preview_df.sort_values(["Score","Empresa"],ascending=[False,True])
-        if mode=="live"
-        else all_df
-    )
+    if mode == "live":
+        if sort_option == "Mayor % de ajuste":
+            df = preview_df.sort_values(
+                ["Score","Empresa"],
+                ascending=[False,True],
+                na_position="last"
+            )
+        elif sort_option == "Menor % de ajuste":
+            df = preview_df.sort_values(
+                ["Score","Empresa"],
+                ascending=[True,True],
+                na_position="last"
+            )
+        elif sort_option == "Renta publicada: mayor a menor":
+            df = preview_df.sort_values(
+                ["RentaValor","Score"],
+                ascending=[False,False],
+                na_position="last"
+            )
+        else:
+            df = preview_df.sort_values(
+                ["Empresa","Score"],
+                ascending=[True,False],
+                na_position="last"
+            )
+    else:
+        df = all_df
 
     tabs = st.tabs([
         f"Resultados ({len(df)})",
