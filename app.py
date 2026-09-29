@@ -1,6 +1,5 @@
 
 
-
 import re
 import sqlite3
 import json
@@ -696,7 +695,7 @@ def suggested_salary(title, description, published_text, user_min, user_max):
 
         return (
             f"{money_clp(low)} – {money_clp(high)}",
-            f"Referencia: {ref['label']}",
+            f"Mercado de {ref['label']}",
             ref["source"]
         )
 
@@ -704,7 +703,7 @@ def suggested_salary(title, description, published_text, user_min, user_max):
     fallback_high = user_max if user_max else max(user_min + 500_000, 2_500_000)
     return (
         f"{money_clp(user_min)} – {money_clp(fallback_high)}",
-        "Basada en tu rango objetivo; sin referencia específica del cargo",
+        "Estimación basada en tu rango objetivo; sin referencia salarial específica para este cargo",
         "Perfil de búsqueda"
     )
 
@@ -1886,22 +1885,37 @@ def render_job_cards(data, context="Resultados"):
                     f"🎯 **Pretensión sugerida:** {pretension}"
                 )
 
-                # Referencia salarial
+                # Referencia y criterio salarial
                 pret_note = r.get("PretensionNota", "") or ""
                 pret_source = r.get("PretensionFuente", "") or ""
 
-                referencia = ""
-                if pret_note and pret_source:
-                    referencia = f"{pret_note} — {pret_source}"
-                elif pret_note:
-                    referencia = pret_note
-                elif pret_source:
-                    referencia = pret_source
-
-                if referencia:
-                    st.markdown(
-                        f"**Referencia:** {referencia}"
-                    )
+                if pret_note or pret_source:
+                    if pret_source == "Aviso publicado":
+                        st.markdown(
+                            f"**Referencia salarial:** banda informada en el aviso"
+                        )
+                        st.caption(
+                            "Criterio: la pretensión se posiciona dentro de la banda publicada, "
+                            "considerando tu rango objetivo."
+                        )
+                    elif pret_source and pret_source != "Perfil de búsqueda":
+                        clean_note = pret_note.replace("Referencia:", "").strip()
+                        st.markdown(
+                            f"**Referencia salarial:** {clean_note} — {pret_source}"
+                        )
+                        st.caption(
+                            "Criterio: estimación orientativa usando referencia de mercado chilena, "
+                            "seniority del cargo y tu rango objetivo."
+                        )
+                    else:
+                        clean_note = pret_note.replace("Referencia:", "").strip()
+                        st.markdown(
+                            f"**Referencia salarial:** {clean_note or 'Sin referencia específica del cargo'}"
+                        )
+                        st.caption(
+                            "Criterio: estimación basada principalmente en el rango de renta "
+                            "configurado en tu búsqueda."
+                        )
 
                 # Ubicación / modalidad / fuente
                 fuente = r.get("Fuente", "") or "No informada"
