@@ -30,12 +30,29 @@ st.markdown("""
         --gold-soft:#FFF2CF;
         --green:#138A5B;
         --green-soft:#DDF5E8;
-        --red:#B34B4B;
         --text:#17324D;
         --muted:#6D7D8D;
         --line:#E1E8EF;
         --bg:#F7F9FC;
         --card:#FFFFFF;
+    }
+
+    /* Barra superior de Streamlit: elimina el negro */
+    [data-testid="stHeader"] {
+        background: #F7F9FC !important;
+        border-bottom: 1px solid #E1E8EF;
+    }
+
+    [data-testid="stToolbar"] {
+        background: transparent !important;
+    }
+
+    [data-testid="stDecoration"] {
+        display: none;
+    }
+
+    header[data-testid="stHeader"] {
+        color: #123B63 !important;
     }
 
     .stApp {
@@ -45,7 +62,7 @@ st.markdown("""
 
     .block-container {
         max-width: 1400px;
-        padding-top: 1.2rem;
+        padding-top: 1.35rem;
         padding-bottom: 3rem;
         padding-left: 2rem;
         padding-right: 2rem;
@@ -54,10 +71,6 @@ st.markdown("""
     [data-testid="stSidebar"] {
         background: #F4F7FA;
         border-right: 1px solid var(--line);
-    }
-
-    [data-testid="stSidebar"] .block-container {
-        padding-top: 1.4rem;
     }
 
     h1,h2,h3,h4 {
@@ -69,7 +82,7 @@ st.markdown("""
         display:flex;
         align-items:center;
         gap:12px;
-        margin-bottom: 18px;
+        margin-bottom:18px;
     }
 
     .brand-icon {
@@ -85,14 +98,14 @@ st.markdown("""
     }
 
     .brand-title {
-        font-size: 1.25rem;
-        font-weight: 800;
-        color: var(--navy2);
+        font-size:1.25rem;
+        font-weight:800;
+        color:var(--navy2);
         line-height:1.1;
     }
 
     .nav-active {
-        background: linear-gradient(90deg,var(--navy),#175482);
+        background:linear-gradient(90deg,var(--navy),#175482);
         color:white;
         border-radius:10px;
         padding:11px 14px;
@@ -117,11 +130,7 @@ st.markdown("""
 
     .hero {
         border:1px solid #E8DCC8;
-        background:
-            linear-gradient(90deg,rgba(255,249,240,.97) 0%,rgba(255,246,232,.90) 45%,rgba(238,225,204,.72) 100%),
-            url("https://images.unsplash.com/photo-1518005020951-eccb494ad742?auto=format&fit=crop&w=1800&q=75");
-        background-size:cover;
-        background-position:center;
+        background:linear-gradient(90deg,#FFF9F0 0%,#FFF5E7 52%,#EFE5D5 100%);
         border-radius:18px;
         padding:22px 24px;
         box-shadow:0 5px 18px rgba(28,53,79,.06);
@@ -134,12 +143,12 @@ st.markdown("""
     }
 
     .hero p {
-        margin:0 0 14px 0;
+        margin:0;
         color:#4E6276;
     }
 
     div.stButton > button[kind="primary"] {
-        background: linear-gradient(90deg,var(--navy),#155B89);
+        background:linear-gradient(90deg,var(--navy),#155B89);
         color:white;
         border:0;
         border-radius:10px;
@@ -149,26 +158,47 @@ st.markdown("""
     }
 
     div.stButton > button[kind="primary"]:hover {
-        background: linear-gradient(90deg,var(--navy2),var(--navy));
+        background:linear-gradient(90deg,var(--navy2),var(--navy));
         color:white;
     }
 
-    [data-testid="stMetric"] {
-        background: var(--card);
-        border:1px solid var(--line);
+    .metric-card {
+        background:#FFFFFF;
+        border:1px solid #E1E8EF;
         border-radius:15px;
-        padding:15px 18px;
+        padding:15px 17px;
+        min-height:98px;
         box-shadow:0 4px 14px rgba(28,53,79,.05);
+        display:flex;
+        flex-direction:column;
+        justify-content:center;
     }
 
-    [data-testid="stMetricLabel"] {
-        color:var(--muted);
+    .metric-label {
+        color:#6D7D8D;
+        font-size:.82rem;
         font-weight:700;
+        margin-bottom:7px;
     }
 
-    [data-testid="stMetricValue"] {
-        color:var(--navy2);
+    .metric-value {
+        color:#0D2F4F;
+        font-size:1.62rem;
+        line-height:1.05;
         font-weight:800;
+        white-space:nowrap;
+    }
+
+    .metric-value.salary {
+        font-size:1.42rem;
+        letter-spacing:-0.03em;
+    }
+
+    .metric-sub {
+        color:#138A5B;
+        font-size:.76rem;
+        margin-top:5px;
+        font-weight:700;
     }
 
     div[data-baseweb="tab-list"] {
@@ -180,8 +210,6 @@ st.markdown("""
         background:transparent;
         color:#52677C;
         border-radius:0;
-        padding-left:8px;
-        padding-right:8px;
         font-weight:700;
     }
 
@@ -226,33 +254,9 @@ st.markdown("""
         margin-top:4px;
     }
 
-    .badge-gold {
-        display:inline-block;
-        background:var(--gold-soft);
-        color:#875E08;
-        border-radius:8px;
-        padding:4px 9px;
-        font-weight:800;
-        font-size:.8rem;
-    }
-
     .muted {
         color:var(--muted);
         font-size:.9rem;
-    }
-
-    .section-title {
-        font-size:1.02rem;
-        font-weight:800;
-        color:var(--navy2);
-        margin:15px 0 8px 0;
-    }
-
-    div[data-testid="stSelectbox"] label,
-    div[data-testid="stSlider"] label,
-    div[data-testid="stCheckbox"] label {
-        color:var(--text);
-        font-weight:600;
     }
 
     .job-title {
@@ -276,30 +280,19 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ==========================================================
-# PERFIL
-# ==========================================================
 PROFILE = {
     "roles": [
-        "Ingeniera de Procesos",
-        "Analista Senior de Procesos",
-        "Mejora Continua",
-        "Excelencia Operacional",
-        "Experiencia Cliente",
-        "Customer Experience",
-        "Business Process Analyst",
-        "Analista de Operaciones",
-        "PMO",
-        "Control de Gestión",
-        "Business Intelligence",
-        "KPIs",
+        "Ingeniera de Procesos","Analista Senior de Procesos","Mejora Continua",
+        "Excelencia Operacional","Experiencia Cliente","Customer Experience",
+        "Business Process Analyst","Analista de Operaciones","PMO",
+        "Control de Gestión","Business Intelligence","KPIs"
     ],
     "skills": [
         "Power BI","Excel","SQL","Bizagi","BPMN","Lean","Kaizen",
         "AS IS","TO BE","KPIs","automatización","mejora continua",
         "customer journey","gestión de procesos","reportes ejecutivos",
         "coordinación transversal","stakeholders"
-    ],
+    ]
 }
 
 SEARCH_QUERIES = [
@@ -310,12 +303,8 @@ SEARCH_QUERIES = [
     "business process analyst",
 ]
 
-TARGET_MIN = 1_200_000
 TARGET_PLUS = 2_500_000
 
-# ==========================================================
-# BASE DE DATOS LOCAL
-# ==========================================================
 @st.cache_resource
 def get_db():
     conn = sqlite3.connect("jobs.db", check_same_thread=False)
@@ -335,34 +324,30 @@ def get_status(key):
     row = DB.execute("SELECT status FROM job_status WHERE job_key=?", (key,)).fetchone()
     return row[0] if row else "Nueva"
 
-def set_status(key, status):
+def set_status(key,status):
     DB.execute("""
         INSERT INTO job_status(job_key,status,updated_at)
         VALUES(?,?,?)
         ON CONFLICT(job_key)
         DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at
-    """, (key,status,datetime.now().isoformat()))
+    """,(key,status,datetime.now().isoformat()))
     DB.commit()
 
-# ==========================================================
-# LÓGICA DE COMPATIBILIDAD
-# ==========================================================
 def norm(t):
     return re.sub(r"\s+"," ",(t or "").lower()).strip()
 
-def score_job(title, company, desc):
+def score_job(title,company,desc):
     text = norm(f"{title} {company} {desc}")
     score = 35
+    score += min(sum(norm(s) in text for s in PROFILE["skills"]) * 4,36)
 
-    score += min(sum(norm(s) in text for s in PROFILE["skills"]) * 4, 36)
-
-    role_hits = 0
+    hits = 0
     for role in PROFILE["roles"]:
-        words = [w for w in norm(role).split() if len(w) > 3]
-        if words and sum(w in text for w in words) >= max(1, len(words)//2):
-            role_hits += 1
+        words = [w for w in norm(role).split() if len(w)>3]
+        if words and sum(w in text for w in words) >= max(1,len(words)//2):
+            hits += 1
 
-    score += min(role_hits * 6, 24)
+    score += min(hits*6,24)
 
     if any(x in text for x in ["senior","sr.","especialista","ingeniero","ingeniera"]):
         score += 4
@@ -372,29 +357,22 @@ def score_job(title, company, desc):
 
     return max(0,min(score,100))
 
-def compatibility(score):
-    if score >= 80:
-        return "Alto"
-    if score >= 65:
-        return "Medio"
-    return "Bajo"
-
 def parse_salary(text):
     if not text:
         return None
 
     s = str(text).lower().replace("\xa0"," ")
 
-    m = re.search(r"(\d{1,2})[\.,](\d)\s*(?:mill[oó]n|millones|m)\b", s)
+    m = re.search(r"(\d{1,2})[\.,](\d)\s*(?:mill[oó]n|millones|m)\b",s)
     if m:
-        return int(float(f"{m.group(1)}.{m.group(2)}") * 1_000_000)
+        return int(float(f"{m.group(1)}.{m.group(2)}")*1_000_000)
 
-    m = re.search(r"(\d{1,2})\s*(?:mill[oó]n|millones)\b", s)
+    m = re.search(r"(\d{1,2})\s*(?:mill[oó]n|millones)\b",s)
     if m:
-        return int(m.group(1)) * 1_000_000
+        return int(m.group(1))*1_000_000
 
     vals = []
-    for raw in re.findall(r"\$?\s*(\d[\d\.\,]{5,})", s):
+    for raw in re.findall(r"\$?\s*(\d[\d\.\,]{5,})",s):
         d = re.sub(r"\D","",raw)
         if d.isdigit():
             v = int(d)
@@ -408,51 +386,45 @@ def salary_data(job):
 
     if isinstance(ext,dict) and ext.get("salary"):
         txt = str(ext["salary"])
-        return txt, parse_salary(txt)
+        return txt,parse_salary(txt)
 
     text = " ".join(job.get("extensions",[]) or []) + " " + job.get("description","")
     v = parse_salary(text)
 
     if v:
-        return f"${v:,.0f} CLP".replace(",","."), v
+        return f"${v:,.0f} CLP".replace(",","."),v
 
-    return "Sin renta publicada", None
+    return "Sin renta publicada",None
 
 def detect_work_mode(job):
     text = norm(
         f"{job.get('title','')} {job.get('location','')} "
         f"{job.get('description','')} {' '.join(job.get('extensions',[]) or [])}"
     )
+
     if "remoto" in text or "remote" in text:
         return "Remoto"
     if "híbrido" in text or "hibrido" in text or "hybrid" in text:
         return "Híbrido"
+
     return "Presencial / no informado"
 
 def extract_skills(desc):
     text = norm(desc)
-    labels = []
     mapping = [
-        ("bpmn","BPM/BPMN"),
-        ("power bi","Power BI"),
-        ("sql","SQL"),
-        ("mejora continua","Mejora Continua"),
-        ("automatiz","Automatización"),
-        ("stakeholder","Stakeholders"),
-        ("kpi","KPIs"),
-        ("as is","AS IS / TO BE"),
-        ("to be","AS IS / TO BE"),
-        ("lean","Lean"),
-        ("kaizen","Kaizen"),
+        ("bpmn","BPM/BPMN"),("power bi","Power BI"),("sql","SQL"),
+        ("mejora continua","Mejora Continua"),("automatiz","Automatización"),
+        ("stakeholder","Stakeholders"),("kpi","KPIs"),("as is","AS IS / TO BE"),
+        ("to be","AS IS / TO BE"),("lean","Lean"),("kaizen","Kaizen")
     ]
+
+    labels = []
     for key,label in mapping:
         if key in text and label not in labels:
             labels.append(label)
+
     return labels[:6]
 
-# ==========================================================
-# BÚSQUEDA
-# ==========================================================
 def serp_key():
     try:
         return st.secrets.get("SERPAPI_KEY","")
@@ -463,9 +435,9 @@ def search_live():
     key = serp_key()
 
     if not key or key == "TU_CLAVE_AQUI":
-        return [], ["No se encontró una SERPAPI_KEY válida."]
+        return [],["No se encontró una SERPAPI_KEY válida."]
 
-    jobs, errors = [], []
+    jobs,errors = [],[]
 
     for q in SEARCH_QUERIES:
         try:
@@ -486,6 +458,7 @@ def search_live():
                     detail = r.json().get("error",r.text[:160])
                 except Exception:
                     detail = r.text[:160]
+
                 errors.append(f"{q}: HTTP {r.status_code} — {detail}")
                 continue
 
@@ -500,19 +473,15 @@ def search_live():
         except Exception as e:
             errors.append(f"{q}: {type(e).__name__}")
 
-    unique, keys = [], set()
+    unique,keys = [],set()
 
     for j in jobs:
-        k = (
-            j.get("title",""),
-            j.get("company_name",""),
-            j.get("location","")
-        )
+        k = (j.get("title",""),j.get("company_name",""),j.get("location",""))
         if k not in keys:
             keys.add(k)
             unique.append(j)
 
-    return unique, errors
+    return unique,errors
 
 def fallback_links():
     rows = []
@@ -568,7 +537,6 @@ def build_df(jobs):
 
         score = score_job(title,company,desc)
         sal_txt,sal_val = salary_data(j)
-
         key = f"{title}|{company}|{loc}"
 
         rows.append({
@@ -577,7 +545,6 @@ def build_df(jobs):
             "Ubicación":loc,
             "Fuente":j.get("via",""),
             "Score":score,
-            "Ajuste":compatibility(score),
             "Renta":sal_txt,
             "RentaValor":sal_val,
             "Modalidad":detect_work_mode(j),
@@ -606,9 +573,9 @@ with st.sidebar:
     <div class="nav-item">✅ &nbsp; Postuladas</div>
     <div class="nav-item">🗑️ &nbsp; Descartadas</div>
     <div class="nav-item">🕘 &nbsp; Historial</div>
-    """, unsafe_allow_html=True)
+    """,unsafe_allow_html=True)
 
-    st.markdown('<div class="sidebar-section">Filtros de búsqueda</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sidebar-section">Filtros de búsqueda</div>',unsafe_allow_html=True)
 
     min_score = st.slider("Compatibilidad mínima",0,100,65,5)
 
@@ -617,11 +584,12 @@ with st.sidebar:
         ["$1,2M","$1,5M","$1,8M","$2,0M"],
         index=0
     )
+
     salary_min_map = {
         "$1,2M":1_200_000,
         "$1,5M":1_500_000,
         "$1,8M":1_800_000,
-        "$2,0M":2_000_000,
+        "$2,0M":2_000_000
     }
     salary_min = salary_min_map[salary_min_label]
 
@@ -630,10 +598,11 @@ with st.sidebar:
         ["$2,0M","$2,5M+","Sin límite"],
         index=1
     )
+
     salary_max_map = {
         "$2,0M":2_000_000,
         "$2,5M+":2_500_000,
-        "Sin límite":None,
+        "Sin límite":None
     }
     salary_max = salary_max_map[salary_max_label]
 
@@ -642,44 +611,27 @@ with st.sidebar:
     show_below = st.checkbox("Mostrar rentas < $1,2M",False)
     only_salary = st.checkbox("Solo con renta publicada",False)
 
-    st.markdown('<div class="sidebar-section">Tipo de trabajo</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sidebar-section">Tipo de trabajo</div>',unsafe_allow_html=True)
     hybrid = st.checkbox("Híbrido",True)
     remote = st.checkbox("Remoto",True)
     onsite = st.checkbox("Presencial",False)
 
-    st.markdown('<div class="sidebar-section">Ubicación</div>', unsafe_allow_html=True)
-    st.selectbox(
-        "Zona",
-        ["Santiago (híbrido / remoto)","Santiago","Remoto Chile"],
-        index=0,
-        label_visibility="collapsed"
-    )
-
 # ==========================================================
 # HEADER
 # ==========================================================
-head1, head2 = st.columns([4,1])
-with head1:
-    st.markdown("## 💼 Buscador Laboral · Paulina Vergara")
-    st.caption("Procesos · Mejora Continua · Operaciones · CX · PMO · Control de Gestión · BI")
-
-with head2:
-    st.markdown(
-        f"<div style='text-align:right;color:#425B72;font-weight:700;padding-top:8px;'>"
-        f"📅 {datetime.now().strftime('%d de %B de %Y')}</div>",
-        unsafe_allow_html=True
-    )
+st.markdown("## 💼 Buscador Laboral · Paulina Vergara")
+st.caption("Procesos · Mejora Continua · Operaciones · CX · PMO · Control de Gestión · BI")
 
 st.markdown("""
 <div class="hero">
     <h2>Encuentra oportunidades que se ajusten a tu perfil</h2>
     <p>Cargos en procesos, mejora continua, operaciones, experiencia cliente, PMO y control de gestión.</p>
 </div>
-""", unsafe_allow_html=True)
+""",unsafe_allow_html=True)
 
 if st.button("🔎 BUSCAR OFERTAS DE HOY",type="primary",use_container_width=True):
     with st.spinner("Buscando oportunidades compatibles..."):
-        live, errors = search_live()
+        live,errors = search_live()
 
     if live:
         st.session_state["jobs"] = live
@@ -687,10 +639,11 @@ if st.button("🔎 BUSCAR OFERTAS DE HOY",type="primary",use_container_width=Tru
         st.session_state["errors"] = errors
         st.session_state["found_count"] = len(live)
     else:
-        st.session_state["jobs"] = fallback_links()
+        fallback = fallback_links()
+        st.session_state["jobs"] = fallback
         st.session_state["mode"] = "fallback"
         st.session_state["errors"] = errors
-        st.session_state["found_count"] = 0
+        st.session_state["found_count"] = len(fallback)
 
     st.rerun()
 
@@ -698,17 +651,10 @@ jobs = st.session_state.get("jobs",[])
 mode = st.session_state.get("mode")
 errors = st.session_state.get("errors",[])
 
-# ==========================================================
-# MÉTRICAS
-# ==========================================================
-if jobs:
-    all_df = build_df(jobs)
-else:
-    all_df = pd.DataFrame()
+all_df = build_df(jobs) if jobs else pd.DataFrame()
+preview_df = all_df.copy()
 
 if mode == "live" and not all_df.empty:
-    preview_df = all_df.copy()
-
     if not show_low:
         preview_df = preview_df[preview_df["Score"] >= min_score]
 
@@ -728,26 +674,79 @@ if mode == "live" and not all_df.empty:
     if only_salary:
         preview_df = preview_df[preview_df["RentaValor"].notna()]
 
-    work_modes = []
-    if hybrid: work_modes.append("Híbrido")
-    if remote: work_modes.append("Remoto")
-    if onsite: work_modes.append("Presencial / no informado")
+    modes = []
+    if hybrid: modes.append("Híbrido")
+    if remote: modes.append("Remoto")
+    if onsite: modes.append("Presencial / no informado")
 
-    if work_modes:
-        preview_df = preview_df[preview_df["Modalidad"].isin(work_modes)]
+    if modes:
+        preview_df = preview_df[preview_df["Modalidad"].isin(modes)]
 
     if only_new:
-        preview_df = preview_df[preview_df["Estado"] == "Nueva"]
+        preview_df = preview_df[preview_df["Estado"]=="Nueva"]
 
+# ==========================================================
+# MÉTRICAS PERSONALIZADAS (sin cortes de texto)
+# ==========================================================
+if mode == "fallback":
+    first_label = "Búsquedas disponibles"
+    first_value = len(all_df)
+    first_sub = "accesos directos activos"
 else:
-    preview_df = all_df.copy()
+    first_label = "Ofertas encontradas"
+    first_value = len(all_df) if mode == "live" else 0
+    first_sub = "ofertas únicas"
 
-m1,m2,m3,m4,m5 = st.columns(5)
-m1.metric("Ofertas encontradas", st.session_state.get("found_count",0))
-m2.metric("Visibles con filtros", len(preview_df) if mode=="live" else 0)
-m3.metric("Ajuste alto", int((preview_df["Score"]>=80).sum()) if mode=="live" and not preview_df.empty else 0)
-m4.metric("Con renta publicada", int(preview_df["RentaValor"].notna().sum()) if mode=="live" and not preview_df.empty else 0)
-m5.metric("Renta objetivo", f"{salary_min_label} – {salary_max_label}")
+visible_count = len(preview_df) if mode == "live" else len(all_df) if mode == "fallback" else 0
+high_count = int((preview_df["Score"]>=80).sum()) if mode=="live" and not preview_df.empty else 0
+salary_count = int(preview_df["RentaValor"].notna().sum()) if mode=="live" and not preview_df.empty else 0
+
+c1,c2,c3,c4,c5 = st.columns(5)
+
+with c1:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-label">{first_label}</div>
+        <div class="metric-value">{first_value}</div>
+        <div class="metric-sub">{first_sub}</div>
+    </div>
+    """,unsafe_allow_html=True)
+
+with c2:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-label">Visibles con filtros</div>
+        <div class="metric-value">{visible_count}</div>
+        <div class="metric-sub">resultados mostrados</div>
+    </div>
+    """,unsafe_allow_html=True)
+
+with c3:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-label">Ajuste alto</div>
+        <div class="metric-value">{high_count}</div>
+        <div class="metric-sub">80% o más</div>
+    </div>
+    """,unsafe_allow_html=True)
+
+with c4:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-label">Con renta publicada</div>
+        <div class="metric-value">{salary_count}</div>
+        <div class="metric-sub">sueldo visible</div>
+    </div>
+    """,unsafe_allow_html=True)
+
+with c5:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-label">Renta objetivo</div>
+        <div class="metric-value salary">{salary_min_label} – {salary_max_label}</div>
+        <div class="metric-sub">CLP mensuales</div>
+    </div>
+    """,unsafe_allow_html=True)
 
 if mode == "live":
     st.success(f"✅ Se encontraron {len(all_df)} ofertas únicas. Mostrando {len(preview_df)} según tus filtros.")
@@ -758,7 +757,11 @@ if mode == "live":
                 st.write("•",e)
 
 elif mode == "fallback":
-    st.warning("⚠️ No hubo resultados integrados. Se muestran búsquedas directas de respaldo.")
+    st.warning(
+        f"⚠️ La búsqueda integrada no respondió. "
+        f"Hay {len(all_df)} búsquedas directas disponibles como respaldo."
+    )
+
     if errors:
         with st.expander("Ver diagnóstico"):
             for e in errors:
@@ -768,13 +771,17 @@ elif mode == "fallback":
 # RESULTADOS
 # ==========================================================
 if jobs:
-    df = preview_df.sort_values(["Score","Empresa"],ascending=[False,True]) if mode=="live" else all_df
+    df = (
+        preview_df.sort_values(["Score","Empresa"],ascending=[False,True])
+        if mode=="live"
+        else all_df
+    )
 
     tabs = st.tabs([
-        f"Resultados ({len(df) if mode=='live' else 0})",
+        f"Resultados ({len(df)})",
         f"Guardadas ({int((df['Estado']=='Guardada').sum()) if not df.empty else 0})",
         f"Postuladas ({int((df['Estado']=='Postulada').sum()) if not df.empty else 0})",
-        f"Descartadas ({int((df['Estado']=='Descartada').sum()) if not df.empty else 0})",
+        f"Descartadas ({int((df['Estado']=='Descartada').sum()) if not df.empty else 0})"
     ])
 
     def render(data,status=None):
@@ -807,27 +814,29 @@ if jobs:
                             unsafe_allow_html=True
                         )
                     else:
-                        salary_tag = "2,5M+" if (
-                            r["RentaValor"] is not None and r["RentaValor"] >= TARGET_PLUS
-                        ) else r["Renta"]
+                        salary_tag = (
+                            "2,5M+"
+                            if r["RentaValor"] is not None and r["RentaValor"] >= TARGET_PLUS
+                            else r["Renta"]
+                        )
 
                         st.markdown(
                             f"<div class='salary-line'>💵 {salary_tag} &nbsp;&nbsp; "
-                            f"💼 Tiempo indefinido / revisar aviso &nbsp;&nbsp; "
                             f"🏢 {r['Modalidad']}</div>",
                             unsafe_allow_html=True
                         )
 
                     if r["Descripción"]:
-                        text = r["Descripción"]
+                        t = r["Descripción"]
                         st.markdown(
-                            f"<div class='muted'>{text[:360]}{'...' if len(text)>360 else ''}</div>",
+                            f"<div class='muted'>{t[:360]}{'...' if len(t)>360 else ''}</div>",
                             unsafe_allow_html=True
                         )
 
                     if r["Skills"]:
                         chips = "".join(
-                            [f"<span class='badge-blue'>{s}</span>" for s in r["Skills"]]
+                            f"<span class='badge-blue'>{s}</span>"
+                            for s in r["Skills"]
                         )
                         st.markdown(chips,unsafe_allow_html=True)
 
@@ -841,7 +850,6 @@ if jobs:
 
                     if not r["_fallback"]:
                         values = ["Nueva","Guardada","Postulada","Descartada"]
-
                         selected = st.selectbox(
                             "Estado",
                             values,
@@ -869,14 +877,12 @@ else:
     st.markdown("""
     ### Cómo usarla
     1. Presiona **BUSCAR OFERTAS DE HOY**.
-    2. La aplicación buscará oportunidades relacionadas con tu perfil.
-    3. Usa los filtros de la izquierda para ajustar compatibilidad, sueldo y modalidad.
-    4. Revisa primero las ofertas de mayor compatibilidad.
-    5. Marca las vacantes como **Guardada**, **Postulada** o **Descartada**.
+    2. Usa los filtros laterales para ajustar compatibilidad, renta y modalidad.
+    3. Revisa primero los resultados con mayor compatibilidad.
+    4. Guarda, postula o descarta cada oportunidad.
     """)
 
 st.markdown("---")
 st.caption(
-    "La compatibilidad es orientativa. La renta solo se muestra cuando aparece en la publicación. "
-    "Revisa siempre las condiciones en el aviso original."
+    "La compatibilidad es orientativa. La renta solo se muestra cuando aparece en el aviso original."
 )
